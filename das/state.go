@@ -8,7 +8,7 @@ import (
 // state collects information about the DASer process. Currently, there are
 // only two sampling routines: the main sampling routine which performs sampling
 // over current network headers, and the `catchUp` routine which performs sampling
-// over past headers from the last sampled checkpoint.
+// over past headers from the maxKnownHeight sampled checkpoint.
 type state struct {
 	sampleLk sync.RWMutex
 	sample   RoutineState // tracks information related to the main sampling routine
@@ -28,6 +28,9 @@ type RoutineState struct {
 	// tracks the square width of the latest successfully sampled
 	// height of the routine
 	LatestSampledSquareWidth uint64 `json:"latest_sampled_square_width"`
+	// amount of sampled headers
+	SampledHeadersAmount uint64 `json:"sampled_header_amount"`
+	Concurrency          uint64 `json:"concurrency"`
 	// tracks whether routine is running
 	IsRunning bool `json:"is_running"`
 }
