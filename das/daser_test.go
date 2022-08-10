@@ -55,7 +55,7 @@ func TestDASerLifecycle(t *testing.T) {
 		t.Fatal(ctx.Err())
 	case <-mockGet.doneCh:
 	}
-	// give catch-up routine a second to finish up sampling maxKnownHeight header
+	// give catch-up routine a second to finish up sampling maxKnown header
 	for {
 		select {
 		case <-ctx.Done():
@@ -178,7 +178,7 @@ func TestDASer_catchUp_oneHeader(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// store checkpoint
-	err := storeCheckpoint(ctx, daser.cstore, 5) // pick arbitrary height as maxKnownHeight checkpoint
+	err := storeCheckpoint(ctx, daser.cstore, 5) // pick arbitrary height as maxKnown checkpoint
 	require.NoError(t, err)
 
 	checkpoint, err := loadCheckpoint(ctx, daser.cstore)
@@ -222,7 +222,7 @@ func TestDASer_catchUp_fails(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// store checkpoint
-	err := storeCheckpoint(ctx, daser.cstore, 5) // pick arbitrary height as maxKnownHeight checkpoint
+	err := storeCheckpoint(ctx, daser.cstore, 5) // pick arbitrary height as maxKnown checkpoint
 	require.NoError(t, err)
 
 	checkpoint, err := loadCheckpoint(ctx, daser.cstore)
