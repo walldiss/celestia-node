@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -20,12 +18,16 @@ import (
 
 var log = logging.Logger("das")
 
+const (
+	priorityLimit = 1024
+	concurrency   = 1 //TODO: move to conf?
+)
+
 type Config struct {
 	da     share.Availability
 	bcast  fraud.Broadcaster
-	hsub   header.Subscriber // listens for new headers in the network
-	getter header.Getter     // retrieves past headers
-
+	hsub   header.Subscriber   // listens for new headers in the network
+	getter header.Getter       // retrieves past headers
 	cstore datastore.Datastore // checkpoint store
 }
 
@@ -33,55 +35,41 @@ type Config struct {
 type DASer struct {
 	Config
 
-	state         *samplingState
-	sampleTimeout time.Duration
-	concurrency   int
-	stats         atomic.Value
+	sampler *samplingManager
 
-	nextCh      chan uint64
-	discoveryCh chan *header.ExtendedHeader
-	retryCh     chan uint64
+	stats atomic.Value
 
-	cancel    context.CancelFunc
-	closed    int32
-	workersWg *sync.WaitGroup
-	done      chan struct{}
+	cancel context.CancelFunc
+	closed int32
 }
 
-type samplingState struct {
-	priority         []uint64 //  priority for headers in order of increasing priority
-	inProgress       map[uint64]struct{}
-	maxKnownHeight   uint64
-	sampleFromHeight uint64
+type result struct {
+	height uint64
+	failed bool
 }
+
+type listenFn func(ctx context.Context, height uint64)
 
 // NewDASer creates a new DASer.
 func NewDASer(
 	da share.Availability,
 	hsub header.Subscriber,
-	getter header.Getter,
+	getter header.Store,
 	cstore datastore.Datastore,
 	bcast fraud.Broadcaster,
 ) *DASer {
-	wrappedDS := wrapCheckpointStore(cstore)
-	return &DASer{
+	d := &DASer{
 		Config: Config{
 			da:     da,
 			bcast:  bcast,
 			hsub:   hsub,
 			getter: getter,
-			cstore: wrappedDS,
+			cstore: wrapCheckpointStore(cstore),
 		},
-		state:         nil,
-		sampleTimeout: 20 * time.Second, //TODO: add to config
-		concurrency:   10,               //TODO: add to config
-		// stats:         atomic.Value{},
-		nextCh:      make(chan uint64, 16),
-		discoveryCh: make(chan *header.ExtendedHeader),
-		retryCh:     make(chan uint64),
-		workersWg:   new(sync.WaitGroup),
-		done:        make(chan struct{}),
 	}
+	d.sampler = newSamplingManager(concurrency, d.fetch)
+
+	return d
 }
 
 // Start initiates subscription for new ExtendedHeaders and spawns a sampling routine.
@@ -98,22 +86,24 @@ func (d *DASer) Start(ctx context.Context) error {
 	// load latest DASed checkpoint
 	checkpoint, err := loadCheckpoint(ctx, d.cstore)
 	if err != nil {
-		return err
+		h, err := d.getter.Head(ctx)
+		if err == nil {
+			checkpoint = checkPoint{
+				MinSampledHeight: 1,
+				MaxKnownHeight:   uint64(h.Height),
+			}
+
+			log.Warnw("set max known height from store", "height", checkpoint.MaxKnownHeight)
+		}
 	}
 	log.Infow("loaded checkpoint", "height", checkpoint)
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
-	d.state = checkpoint.samplingState()
 
+	go d.sampler.run(runCtx, checkpoint)
 	// discover new headers
-	go d.runDiscovery(runCtx, sub)
-	// fan-out routine
-	go d.samplingManager(runCtx)
-
-	for i := 0; i < d.concurrency; i++ {
-		go d.startWorker(runCtx, i)
-	}
+	go runDiscovery(runCtx, sub, d.sampler.listen)
 
 	return nil
 }
@@ -123,118 +113,18 @@ func (d *DASer) Stop(ctx context.Context) error {
 	if atomic.CompareAndSwapInt32(&d.closed, 0, 1) {
 		d.cancel()
 
-		select {
-		case <-d.done:
-			// all workers are done, can store state now
-			d.storeState(ctx, d.state)
-		case <-ctx.Done():
-			return ctx.Err()
+		if err := d.sampler.stop(ctx, d.storeState); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return errors.New("DASer force quit")
+			}
+			return err
 		}
 	}
 	return nil
-	//	// Stop func can now be invoked twice in one Lifecycle, when:
-	//	// * BEFP is received;
-	//	// * node is stopping;
-	//	// this statement helps avoiding panic on the second Stop.
-	//	// If ctx.Err is not nil then it means that Stop was called for the first time.
-	//	// NOTE: we are expecting *only* ContextCancelled error here.
-	//	//if d.ctx.Err() == context.Canceled {
-	//	//	return nil
-	//	//}
-	//	//d.cancel()
-	//	//// wait for both sampling routines to exit
-	//	//for i := 0; i < 2; i++ {
-	//	//	select {
-	//	//	case <-d.catchUpDn:
-	//	//	case <-d.sampleDn:
-	//	//	case <-ctx.Done():
-	//	//		return ctx.Err()
-	//	//	}
-	//	//}
-	//	//d.cancel = nil
-	//	//return nil
-}
-
-func (c checkPoint) samplingState() *samplingState {
-	//sort in Asc order
-	sort.Slice(c.queue, func(i, j int) bool { return c.queue[i] < c.queue[j] })
-	return &samplingState{
-		priority:         c.queue,
-		inProgress:       make(map[uint64]struct{}),
-		maxKnownHeight:   c.maxKnownHeight,
-		sampleFromHeight: c.minSampledHeight,
-	}
-}
-
-func (d *DASer) runDiscovery(ctx context.Context, sub header.Subscription) {
-	for {
-		h, err := sub.NextHeader(ctx)
-		if err != nil {
-			if err == context.Canceled {
-				return
-			}
-
-			log.Errorw("failed to get next header", "err", err)
-			continue
-		}
-
-		select {
-		case d.discoveryCh <- h:
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (d *DASer) samplingManager(ctx context.Context) {
-	noop := make(chan uint64)
-	for {
-		// d.updateSampleStats() TODO:implement me
-
-		nextCh := d.nextCh
-		next, ok := d.state.nextHeight()
-		if !ok {
-			nextCh = noop
-		}
-
-		select {
-		case nextCh <- next:
-			d.state.setInProgress(next)
-		case last := <-d.discoveryCh:
-			d.state.setLast(uint64(last.Height))
-		case failed := <-d.retryCh:
-			d.state.retry(failed)
-		case <-ctx.Done():
-			close(d.nextCh)
-			d.workersWg.Wait()
-			return
-		}
-	}
-}
-
-func (d *DASer) startWorker(ctx context.Context, num int) {
-	d.workersWg.Add(1)
-	defer d.workersWg.Done()
-
-	for height := range d.nextCh {
-		log.Infow("fetching from worker", "height", height, "worker", num)
-		err := d.fetch(ctx, height)
-		log.Infow("fetched from worker", "worker", num, "error", err)
-		if err != nil {
-			select {
-			case d.retryCh <- height: //TODO: no handling, just retry for now
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
 }
 
 func (d *DASer) fetch(ctx context.Context, height uint64) error {
-	ctx, cancel := context.WithTimeout(ctx, d.sampleTimeout)
-	defer cancel()
-
-	h, err := d.getter.GetByHeight(ctx, uint64(height))
+	h, err := d.getter.GetByHeight(ctx, height)
 	if err != nil {
 		return err
 	}
@@ -242,87 +132,14 @@ func (d *DASer) fetch(ctx context.Context, height uint64) error {
 	return d.sampleHeader(ctx, h)
 }
 
-func (s samplingState) retry(failed uint64) {
-	delete(s.inProgress, failed)
-
-	// put item back to priority for retry
-	s.priority = append(s.priority, s.maxKnownHeight)
-
-	return
-}
-
-func (s *samplingState) setLast(last uint64) {
-	if s.maxKnownHeight == 0 {
-		log.Infow("discovered first header, starting sampling")
-		// there is no known header yet, start sampling over
-		s.sampleFromHeight, s.maxKnownHeight = 1, last
-		return
-	}
-
-	// put newly discovered heights with the highest priority
-	// TODO:
-	//  if header height advanced for more than 2147483647, it will panic.
-	//  maybe if difference is high, just restart the process over from last,
-	//  instead of blowing the priority slice. Imo, would keep as is
-	for last > s.maxKnownHeight {
-		s.maxKnownHeight++
-		s.priority = append(s.priority, s.maxKnownHeight)
-	}
-}
-
-func (s *samplingState) nextHeight() (uint64, bool) {
-	if len(s.priority) > 0 {
-		return s.priority[len(s.priority)-1], true
-	}
-
-	//TODO: is height == 0 possible to sample?
-	if s.sampleFromHeight > 0 {
-		return s.sampleFromHeight, true
-	}
-
-	return 0, false
-}
-
-func (s *samplingState) setInProgress(height uint64) {
-	s.inProgress[height] = struct{}{}
-
-	if height == s.sampleFromHeight {
-		s.sampleFromHeight--
-		return
-	}
-
-	var next uint64
-	if len(s.priority) > 0 {
-		next = s.priority[len(s.priority)-1]
-		s.priority = s.priority[:len(s.priority)-1]
-	}
-
-	if next != height {
-		log.Fatalf("unexpected next height. expected: %v, actual: %s ", next, height) //TODO:remove checks
-	}
-}
-
-func (s *samplingState) checkPoint() checkPoint {
-	for h := range s.inProgress {
-		s.priority = append(s.priority, h)
-	}
-	return checkPoint{
-		minSampledHeight: s.sampleFromHeight,
-		maxKnownHeight:   s.maxKnownHeight,
-		queue:            s.priority,
-	}
-}
-
-func (d *DASer) storeState(ctx context.Context, s *samplingState) {
+func (d *DASer) storeState(ctx context.Context, s *state) {
 	// store latest DASed checkpoint to disk here to ensure that if DASer is not yet
 	// fully caught up to network head, it will resume DASing from this checkpoint
 	// up to current network head
-	// TODO @renaynay: Implement Share Cache #180 to ensure no duplicate DASing over same
-	//  header
 	if err := storeCheckpoint(ctx, d.cstore, s.checkPoint()); err != nil {
 		log.Errorw("storing checkpoint to disk", "err", err)
 	}
-	log.Infow("stored checkpoint to disk")
+	log.Infow("stored checkpoint to disk", "checkpoint", s.checkPoint())
 }
 
 func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) error {
@@ -352,6 +169,45 @@ func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) erro
 		"square width", len(h.DAH.RowsRoots), "finished (s)", sampleTime.Seconds())
 
 	return nil
+}
+
+func runDiscovery(ctx context.Context, sub header.Subscription, emit listenFn) {
+	for {
+		// discover new headers to keep sampling process up-to-date with current network state
+		h, err := sub.NextHeader(ctx)
+		if err != nil {
+			if err == context.Canceled {
+				return
+			}
+
+			log.Errorw("failed to get next header", "err", err)
+			continue
+		}
+		log.Infow("discovered new header", "height", h.Height)
+
+		emit(ctx, uint64(h.Height))
+	}
+}
+
+func runWorker(ctx context.Context,
+	inCh <-chan uint64,
+	outCh chan<- result,
+	fetch func(ctx2 context.Context, uint642 uint64) error,
+	num int) {
+	log.Infow("started worker ", "num", num)
+
+	for height := range inCh {
+		err := fetch(ctx, height)
+
+		select {
+		case outCh <- result{
+			height: height,
+			failed: err != nil,
+		}:
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 //

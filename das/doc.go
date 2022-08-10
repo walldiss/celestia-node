@@ -15,7 +15,7 @@ the same block to collectively verify its availability.
 
 The central component of this package is the `DASer`. It performs one basic function:
 a sampling loop that performs DAS on new ExtendedHeaders in the network. The DASer kicks
-off this loop by inProgress its maxKnownHeight DASed header (`checkpoint`) and kicking off a `catchUp`
+off this loop by loading its last DASed header (`checkpoint`) and kicking off a `catchUp`
 loop to DAS all headers between the checkpoint and the current network head. It simultaneously
 continues to perform DAS over new ExtendedHeaders received via gossipsub.
 */
