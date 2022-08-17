@@ -12,16 +12,20 @@ type samplingManager struct {
 	fetchFn     func(context.Context, uint64) error
 	storeState  func(context.Context, state)
 	state       *state
-	stats       atomic.Value
 
-	wg            sync.WaitGroup
-	jobsCh        chan uint64 // fan-out jobs to workers
-	resultCh      chan result // fan-in sampling results from worker to coordinator
-	discoveryCh   chan uint64 // update
-	storeCh       chan state
+	//stats       atomic.Value
+	catchUpDone   int32         // indicates if all headers are sampled
+	catchUpDoneCh chan struct{} // blocks until all headers are sampled
+
+	workersWg     sync.WaitGroup
+	jobsCh        chan uint64 // fan-out jobs maxKnown workers
+	resultCh      chan result // fan-in sampling results maxKnown worker maxKnown coordinator
+	discoveryCh   chan uint64 // receives all info about new headers discovery
+	storeCh       chan state  // communicates with backgroundStorer routine
 	storeInterval time.Duration
 
 	coordinatorDone chan struct{}
+	cancel          context.CancelFunc
 }
 
 func newSamplingManager(concurrency int,
@@ -38,19 +42,25 @@ func newSamplingManager(concurrency int,
 		storeCh:         make(chan state),
 		storeInterval:   storeInterval,
 		coordinatorDone: make(chan struct{}),
+		catchUpDoneCh:   make(chan struct{}),
 	}
 }
 
 func (sm *samplingManager) run(ctx context.Context, ch checkPoint) {
+	ctx, sm.cancel = context.WithCancel(ctx)
+
 	sm.state = ch.samplingState()
 
 	go sm.runCoordinator(ctx)
-	go sm.runBackgroundStorer(ctx, sm.storeInterval)
+	if sm.storeInterval > 0 {
+		// run store routine only when storeInterval is specified
+		go sm.runBackgroundStorer(ctx, sm.storeInterval)
+	}
 
 	for i := 0; i < sm.concurrency; i++ {
+		sm.workersWg.Add(1)
 		go func(num int) {
-			sm.wg.Add(1)
-			defer sm.wg.Done()
+			defer sm.workersWg.Done()
 			runWorker(ctx, sm.jobsCh, sm.resultCh, sm.fetchFn, num)
 		}(i)
 	}
@@ -62,7 +72,7 @@ func (sm *samplingManager) runCoordinator(ctx context.Context) {
 	next, done := sm.state.nextHeight()
 
 	for {
-		// sm.updateSampleStats() TODO:implement me
+		sm.updateStats()
 
 		// if nothing to sample, don't send job to workers
 		if done {
@@ -90,6 +100,7 @@ func (sm *samplingManager) runCoordinator(ctx context.Context) {
 }
 
 func (sm *samplingManager) stop(ctx context.Context) error {
+	sm.cancel()
 	// wait for coordinator to exit and store state
 	select {
 	case <-sm.coordinatorDone:
@@ -101,7 +112,7 @@ func (sm *samplingManager) stop(ctx context.Context) error {
 	// wait for all worker routines to finish
 	done := make(chan struct{})
 	go func() {
-		sm.wg.Wait()
+		sm.workersWg.Wait()
 		close(done)
 	}()
 
@@ -134,8 +145,26 @@ func (sm *samplingManager) runBackgroundStorer(ctx context.Context, interval tim
 	}
 }
 
-func (sm *samplingManager) loadStats() stats {
-	return sm.stats.Load().(stats)
+func (sm *samplingManager) updateStats() {
+	if sm.state.minSampled == sm.state.maxKnown {
+		if atomic.CompareAndSwapInt32(&sm.catchUpDone, 0, 1) {
+			close(sm.catchUpDoneCh)
+			return
+		}
+	}
+
+	if atomic.CompareAndSwapInt32(&sm.catchUpDone, 1, 0) {
+		sm.catchUpDoneCh = make(chan struct{})
+	}
+}
+
+func (sm *samplingManager) waitCatchUp(ctx context.Context) error {
+	select {
+	case <-sm.catchUpDoneCh:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
 }
 
 func (sm *samplingManager) listen(ctx context.Context, height uint64) {

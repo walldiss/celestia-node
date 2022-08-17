@@ -13,13 +13,19 @@ import (
 
 func TestCheckpointStore(t *testing.T) {
 	ds := wrapCheckpointStore(sync.MutexWrap(datastore.NewMapDatastore()))
-	checkpoint := int64(5)
+	skipped := make(map[uint64]int)
+	skipped[2] = 1
+	skipped[3] = 2
+	checkpoint := checkPoint{
+		MinSampled: 1,
+		MaxKnown:   6,
+		Skipped:    skipped,
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer t.Cleanup(cancel)
 	err := storeCheckpoint(ctx, ds, checkpoint)
 	require.NoError(t, err)
 	got, err := loadCheckpoint(ctx, ds)
 	require.NoError(t, err)
-
 	assert.Equal(t, checkpoint, got)
 }

@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// TODO(@walldiss): discuss new stats
+
 // state collects information about the DASer process. Currently, there are
 // only two sampling routines: the main sampling routine which performs sampling
 // over current network headers, and the `catchUp` routine which performs sampling
@@ -27,8 +29,11 @@ type RoutineState struct {
 	LatestSampledHeight uint64 `json:"latest_sampled_height"`
 	// tracks the square width of the latest successfully sampled
 	// height of the routine
-	// amount of sampled headers
+	LatestSampledWidth uint64 `json:"latest_sampled_width"`
+	// tracks amount of busy parallel workers
 	Concurrency uint64 `json:"concurrency"`
+	// tracks whether all known headers are sampled
+	CatchUpDone bool `json:"catch_up_done"`
 	// tracks whether routine is running
 	IsRunning bool `json:"is_running"`
 }

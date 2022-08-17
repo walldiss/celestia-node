@@ -2,7 +2,6 @@ package das
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -46,8 +45,8 @@ func TestDASerLifecycle(t *testing.T) {
 		// load checkpoint and ensure it's at network head
 		checkpoint, err := loadCheckpoint(ctx, daser.cstore)
 		require.NoError(t, err)
-		// ensure checkpoint is stored at 15
-		assert.Equal(t, int64(15), checkpoint)
+		// ensure checkpoint is stored at 30
+		assert.EqualValues(t, 30, checkpoint.MinSampled)
 	}()
 	// wait for dasing catch-up routine to finish
 	select {
@@ -56,16 +55,7 @@ func TestDASerLifecycle(t *testing.T) {
 	case <-mockGet.doneCh:
 	}
 	// give catch-up routine a second to finish up sampling maxKnown header
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		default:
-			if daser.CatchUpRoutineState().Finished() {
-				return
-			}
-		}
-	}
+	assert.NoError(t, daser.sampler.waitCatchUp(ctx))
 }
 
 func TestDASer_Restart(t *testing.T) {
@@ -105,6 +95,7 @@ func TestDASer_Restart(t *testing.T) {
 	restartCtx, restartCancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(restartCancel)
 
+	daser = NewDASer(shareServ, sub, mockGet, ds, mockService)
 	err = daser.Start(restartCtx)
 	require.NoError(t, err)
 
@@ -115,143 +106,15 @@ func TestDASer_Restart(t *testing.T) {
 	case <-mockGet.doneCh:
 	}
 
+	assert.NoError(t, daser.sampler.waitCatchUp(ctx))
 	err = daser.Stop(restartCtx)
 	require.NoError(t, err)
-
-	assert.True(t, daser.CatchUpRoutineState().Finished())
 
 	// load checkpoint and ensure it's at network head
 	checkpoint, err := loadCheckpoint(ctx, daser.cstore)
 	require.NoError(t, err)
 	// ensure checkpoint is stored at 45
-	assert.Equal(t, int64(45), checkpoint)
-}
-
-func TestDASer_catchUp(t *testing.T) {
-	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
-	bServ := mdutils.Bserv()
-	avail := share.TestLightAvailability(bServ)
-	mockGet, shareServ, _, mockService := createDASerSubcomponents(t, bServ, 5, 0, avail)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	daser := NewDASer(shareServ, nil, mockGet, ds, mockService)
-
-	type catchUpResult struct {
-		checkpoint int64
-		err        error
-	}
-	resultCh := make(chan *catchUpResult, 1)
-
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// catch up from height 2 to head
-		job := &catchUpJob{
-			from: 2,
-			to:   mockGet.head,
-		}
-		checkpt, err := daser.catchUp(ctx, job)
-		resultCh <- &catchUpResult{
-			checkpoint: checkpt,
-			err:        err,
-		}
-	}()
-	wg.Wait()
-
-	result := <-resultCh
-	assert.Equal(t, mockGet.head, result.checkpoint)
-	require.NoError(t, result.err)
-}
-
-// TestDASer_catchUp_oneHeader tests that catchUp works with a from-to
-// difference of 1
-func TestDASer_catchUp_oneHeader(t *testing.T) {
-	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
-	bServ := mdutils.Bserv()
-	avail := share.TestLightAvailability(bServ)
-	mockGet, shareServ, _, mockService := createDASerSubcomponents(t, bServ, 6, 0, avail)
-	daser := NewDASer(shareServ, nil, mockGet, ds, mockService)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	// store checkpoint
-	err := storeCheckpoint(ctx, daser.cstore, 5) // pick arbitrary height as maxKnown checkpoint
-	require.NoError(t, err)
-
-	checkpoint, err := loadCheckpoint(ctx, daser.cstore)
-	require.NoError(t, err)
-
-	type catchUpResult struct {
-		checkpoint int64
-		err        error
-	}
-	resultCh := make(chan *catchUpResult, 1)
-
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		job := &catchUpJob{
-			from: checkpoint,
-			to:   mockGet.head,
-		}
-		checkpt, err := daser.catchUp(ctx, job)
-		resultCh <- &catchUpResult{
-			checkpoint: checkpt,
-			err:        err,
-		}
-	}()
-	wg.Wait()
-
-	result := <-resultCh
-	assert.Equal(t, mockGet.head, result.checkpoint)
-	require.NoError(t, result.err)
-}
-
-func TestDASer_catchUp_fails(t *testing.T) {
-	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
-	bServ := mdutils.Bserv()
-	avail := share.TestLightAvailability(bServ)
-	mockGet, _, _, mockService := createDASerSubcomponents(t, bServ, 6, 0, avail)
-	daser := NewDASer(share.NewTestBrokenAvailability(), nil, mockGet, ds, mockService)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	// store checkpoint
-	err := storeCheckpoint(ctx, daser.cstore, 5) // pick arbitrary height as maxKnown checkpoint
-	require.NoError(t, err)
-
-	checkpoint, err := loadCheckpoint(ctx, daser.cstore)
-	require.NoError(t, err)
-
-	type catchUpResult struct {
-		checkpoint int64
-		err        error
-	}
-	resultCh := make(chan *catchUpResult, 1)
-
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		job := &catchUpJob{
-			from: checkpoint,
-			to:   mockGet.head,
-		}
-		checkpt, err := daser.catchUp(ctx, job)
-		resultCh <- &catchUpResult{
-			checkpoint: checkpt,
-			err:        err,
-		}
-	}()
-	wg.Wait()
-
-	result := <-resultCh
-	require.ErrorIs(t, result.err, share.ErrNotAvailable)
+	assert.EqualValues(t, 60, checkpoint.MinSampled)
 }
 
 func TestDASer_stopsAfter_BEFP(t *testing.T) {
@@ -292,108 +155,109 @@ func TestDASer_stopsAfter_BEFP(t *testing.T) {
 	case res := <-resultCh:
 		require.NoError(t, res)
 	}
-	require.True(t, daser.ctx.Err() == context.Canceled)
+	require.True(t, daser.closed == 1)
 }
 
-func TestDASerState(t *testing.T) {
-	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
-	bServ := mdutils.Bserv()
-
-	// 30 headers in the past and 30 headers in the future (so final sample height should be 60)
-	mockGet, shareServ, sub, fraud := createDASerSubcomponents(t, bServ, 30, 30, share.NewTestSuccessfulAvailability())
-	expectedFinalSampleHeight := uint64(60)
-	expectedFinalSampleWidth := uint64(len(sub.Headers[29].DAH.RowsRoots))
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	t.Cleanup(cancel)
-
-	daser := NewDASer(shareServ, sub, mockGet, ds, fraud)
-	err := daser.Start(ctx)
-	require.NoError(t, err)
-	defer func() {
-		// wait for all "future" headers to be sampled
-		for {
-			select {
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			default:
-				if daser.SampleRoutineState().LatestSampledHeight == expectedFinalSampleHeight {
-					assert.Equal(t, expectedFinalSampleWidth, daser.SampleRoutineState().LatestSampledSquareWidth)
-
-					err := daser.Stop(ctx)
-					require.NoError(t, err)
-					assert.False(t, daser.SampleRoutineState().IsRunning)
-					return
-				}
-			}
-		}
-	}()
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case <-mockGet.doneCh:
-	}
-	// give catchUp routine a second to exit
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		default:
-			if daser.CatchUpRoutineState().Finished() {
-				return
-			}
-		}
-	}
-}
-
-// TestDASerState_WithErrorInCatchUp tests for the case where an
-// error has occurred inside the catchUp routine, ensuring the catchUp
-// routine exits as expected and reports the error accurately.
-func TestDASerState_WithErrorInCatchUp(t *testing.T) {
-	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
-	bServ := mdutils.Bserv()
-
-	// 30 headers in the past and 30 headers in the future
-	// catchUp routine error should occur at height 16
-	brokenHeight := 16
-	mockGet, shareServ, sub, fraud := createDASerWithFailingAvailability(t, bServ, 30, 30,
-		int64(brokenHeight))
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	t.Cleanup(cancel)
-
-	daser := NewDASer(shareServ, sub, mockGet, ds, fraud)
-	// allow catchUpDn signal to be read twice
-	daser.catchUpDn = make(chan struct{}, 2)
-
-	err := daser.Start(ctx)
-	require.NoError(t, err)
-	defer func() {
-		err = daser.Stop(ctx)
-		require.NoError(t, err)
-	}()
-	// wait until catchUp routine has fetched the broken header
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case <-mockGet.brokenHeightCh:
-	}
-	// wait for daser to exit catchUp routine
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case <-daser.catchUpDn:
-		catchUp := daser.CatchUpRoutineState()
-		// make sure catchUp routine didn't successfully complete
-		assert.False(t, catchUp.Finished())
-		// ensure that the error has been reported
-		assert.NotNil(t, catchUp.Error)
-		assert.Equal(t, uint64(brokenHeight)-1, catchUp.Height)
-		// send another done signal so `Stop` can read it
-		daser.catchUpDn <- struct{}{}
-		return
-	}
-}
+//
+// func TestDASerState(t *testing.T) {
+//	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
+//	bServ := mdutils.Bserv()
+//
+//	// 30 headers in the past and 30 headers in the future (so final sample height should be 60)
+//	mockGet, shareServ, sub, fraud := createDASerSubcomponents(t, bServ, 30, 30, share.NewTestSuccessfulAvailability())
+//	expectedFinalSampleHeight := uint64(60)
+//	expectedFinalSampleWidth := uint64(len(sub.Headers[29].DAH.RowsRoots))
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+//	t.Cleanup(cancel)
+//
+//	daser := NewDASer(shareServ, sub, mockGet, ds, fraud)
+//	err := daser.Start(ctx)
+//	require.NoError(t, err)
+//	defer func() {
+//		// wait for all "future" headers to be sampled
+//		for {
+//			select {
+//			case <-ctx.Done():
+//				t.Fatal(ctx.Err())
+//			default:
+//				if daser.SampleRoutineState().LatestSampledHeight == expectedFinalSampleHeight {
+//					assert.Equal(t, expectedFinalSampleWidth, daser.SampleRoutineState().LatestSampledSquareWidth)
+//
+//					err := daser.Stop(ctx)
+//					require.NoError(t, err)
+//					assert.False(t, daser.SampleRoutineState().IsRunning)
+//					return
+//				}
+//			}
+//		}
+//	}()
+//	select {
+//	case <-ctx.Done():
+//		t.Fatal(ctx.Err())
+//	case <-mockGet.doneCh:
+//	}
+//	// give catchUp routine a second to exit
+//	for {
+//		select {
+//		case <-ctx.Done():
+//			t.Fatal(ctx.Err())
+//		default:
+//			if daser.CatchUpRoutineState().Finished() {
+//				return
+//			}
+//		}
+//	}
+//}
+//
+//// TestDASerState_WithErrorInCatchUp tests for the case where an
+//// error has occurred inside the catchUp routine, ensuring the catchUp
+//// routine exits as expected and reports the error accurately.
+//func TestDASerState_WithErrorInCatchUp(t *testing.T) {
+//	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
+//	bServ := mdutils.Bserv()
+//
+//	// 30 headers in the past and 30 headers in the future
+//	// catchUp routine error should occur at height 16
+//	brokenHeight := 16
+//	mockGet, shareServ, sub, fraud := createDASerWithFailingAvailability(t, bServ, 30, 30,
+//		int64(brokenHeight))
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+//	t.Cleanup(cancel)
+//
+//	daser := NewDASer(shareServ, sub, mockGet, ds, fraud)
+//	// allow catchUpDn signal to be read twice
+//	daser.catchUpDn = make(chan struct{}, 2)
+//
+//	err := daser.Start(ctx)
+//	require.NoError(t, err)
+//	defer func() {
+//		err = daser.Stop(ctx)
+//		require.NoError(t, err)
+//	}()
+//	// wait until catchUp routine has fetched the broken header
+//	select {
+//	case <-ctx.Done():
+//		t.Fatal(ctx.Err())
+//	case <-mockGet.brokenHeightCh:
+//	}
+//	// wait for daser to exit catchUp routine
+//	select {
+//	case <-ctx.Done():
+//		t.Fatal(ctx.Err())
+//	case <-daser.catchUpDn:
+//		catchUp := daser.CatchUpRoutineState()
+//		// make sure catchUp routine didn't successfully complete
+//		assert.False(t, catchUp.Finished())
+//		// ensure that the error has been reported
+//		assert.NotNil(t, catchUp.Error)
+//		assert.Equal(t, uint64(brokenHeight)-1, catchUp.Height)
+//		// send another done signal so `Stop` can read it
+//		daser.catchUpDn <- struct{}{}
+//		return
+//	}
+//}
 
 // createDASerSubcomponents takes numGetter (number of headers
 // to store in mockGetter) and numSub (number of headers to store
@@ -432,22 +296,23 @@ func createMockGetterAndSub(
 	return mockGet, sub
 }
 
-func createDASerWithFailingAvailability(
-	t *testing.T,
-	bServ blockservice.BlockService,
-	numGetter,
-	numSub int,
-	brokenHeight int64,
-) (*mockGetter, *share.Service, *header.DummySubscriber, *fraud.DummyService) {
-	mockGet, sub := createMockGetterAndSub(t, bServ, numGetter, numSub)
-	mockGet.brokenHeight = brokenHeight
-
-	shareServ := share.NewService(bServ, &share.TestBrokenAvailability{
-		Root: mockGet.headers[brokenHeight].DAH,
-	})
-
-	return mockGet, shareServ, sub, new(fraud.DummyService)
-}
+//
+//func createDASerWithFailingAvailability(
+//	t *testing.T,
+//	bServ blockservice.BlockService,
+//	numGetter,
+//	numSub int,
+//	brokenHeight int64,
+//) (*mockGetter, *share.Service, *header.DummySubscriber, *fraud.DummyService) {
+//	mockGet, sub := createMockGetterAndSub(t, bServ, numGetter, numSub)
+//	mockGet.brokenHeight = brokenHeight
+//
+//	shareServ := share.NewService(bServ, &share.TestBrokenAvailability{
+//		Root: mockGet.headers[brokenHeight].DAH,
+//	})
+//
+//	return mockGet, shareServ, sub, new(fraud.DummyService)
+//}
 
 // fillSubWithHeaders generates `num` headers from the future for p2pSub to pipe through to DASer.
 func (m *mockGetter) fillSubWithHeaders(

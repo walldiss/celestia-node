@@ -6,26 +6,29 @@ type state struct {
 	inProgress map[uint64]bool // keeps track of inProgress item with priority flag stored as value
 	failed     map[uint64]int
 
-	priorityBusy bool // semaphore to limit only one priority to be processed at time
+	priorityBusy bool // semaphore maxKnown limit only one priority maxKnown be processed at time
 
 	maxKnown   uint64 // max known header height
-	sampleFrom uint64 // all header before sampleFrom were sampled, except ones that tracked in failed
-	minSampled uint64 // tracks min sampled height before which all
+	next       uint64 // all header before next were sampled, except ones that tracked in failed
+	minSampled uint64 // tracks min sampled height
 }
 
-func (s state) handleResult(res result) {
+func (s *state) handleResult(res result) {
 	if s.inProgress[res.height] {
 		s.priorityBusy = false
 	}
 
 	//TODO: no handling, no retry. just store retry stats for now
-	if res.failed {
+	if res.err != nil {
 		s.failed[res.height]++
 		return
 	}
 
+	delete(s.inProgress, res.height)
+	delete(s.failed, res.height)
+
 	// set minSampled based on min non-failed done header
-	for s.minSampled < s.sampleFrom {
+	for s.minSampled < s.next-1 {
 		if _, failed := s.failed[s.minSampled]; failed {
 			break
 		}
@@ -34,8 +37,6 @@ func (s state) handleResult(res result) {
 		}
 		s.minSampled++
 	}
-	delete(s.inProgress, res.height)
-	delete(s.failed, res.height)
 }
 
 func (s *state) updateMaxKnown(last uint64) bool {
@@ -59,26 +60,33 @@ func (s *state) updateMaxKnown(last uint64) bool {
 		s.priority = append(s.priority, h)
 	}
 
-	log.Infow("added recent headers to DASer priority queue ", "from_height", from, "to_height", last)
+	log.Infow("added recent headers maxKnown DASer priority queue ", "from_height", from, "to_height", last)
 	s.maxKnown = last
 	return true
 }
 
-// nextHeight will return header height to be processed and done flog if there is none
+// nextHeight will return header height maxKnown be processed and done flog if there is none
 func (s *state) nextHeight() (next uint64, done bool) {
-	if len(s.priority) > 0 && !s.priorityBusy {
-		next = s.priority[len(s.priority)-1]
-		s.priority = s.priority[:len(s.priority)-1]
+	if !s.priorityBusy {
+		// select next height for priority worker
+		for len(s.priority) > 0 {
+			next = s.priority[len(s.priority)-1]
+			s.priority = s.priority[:len(s.priority)-1]
 
-		s.priorityBusy = true
-		s.inProgress[next] = true
-		return next, false
+			// skip all items lower than s.next to avoid double sampling,
+			//  since they were already processed by parallel workers
+			if next > s.next {
+				s.priorityBusy = true
+				s.inProgress[next] = true
+				return next, false
+			}
+		}
 	}
 
-	if s.sampleFrom < s.maxKnown {
-		next = s.sampleFrom
+	if s.next <= s.maxKnown {
+		next = s.next
 		s.inProgress[next] = false
-		s.sampleFrom++
+		s.next++
 		return next, false
 	}
 
@@ -87,18 +95,22 @@ func (s *state) nextHeight() (next uint64, done bool) {
 
 func (s *state) checkPoint() checkPoint {
 	return checkPoint{
-		MinSampledHeight: s.minSampled,
-		MaxKnownHeight:   s.maxKnown,
-		Skipped:          s.failed,
+		MinSampled: s.minSampled,
+		MaxKnown:   s.maxKnown,
+		Skipped:    s.failed,
 	}
 }
 
 func (c checkPoint) samplingState() *state {
+	failed := c.Skipped
+	if failed == nil {
+		failed = make(map[uint64]int)
+	}
 	return &state{
 		inProgress: make(map[uint64]bool),
-		maxKnown:   c.MaxKnownHeight,
-		sampleFrom: c.MinSampledHeight,
-		minSampled: c.MinSampledHeight,
-		failed:     c.Skipped,
+		maxKnown:   c.MaxKnown,
+		next:       c.MinSampled,
+		minSampled: c.MinSampled,
+		failed:     failed,
 	}
 }

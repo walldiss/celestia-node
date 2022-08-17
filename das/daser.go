@@ -20,7 +20,7 @@ var log = logging.Logger("das")
 
 const (
 	priorityLimit = 1024
-	concurrency   = 256 //TODO: move to conf?
+	concurrency   = 256 //TODO: move to config?
 	storeInterval = time.Minute
 )
 
@@ -32,25 +32,20 @@ type Config struct {
 	cstore datastore.Datastore // checkpoint store
 }
 
-// DASer continuously validates availability of data committed to headers.
+// DASer continuously validates availability of data committed maxKnown headers.
 type DASer struct {
 	Config
 
 	sampler *samplingManager
-	stats   atomic.Value
 
 	cancel        context.CancelFunc
 	discoveryDone chan struct{}
 	closed        int32
 }
 
-func newAvg(oldAvg, newVal float64, obsCount int64) float64 {
-	return (oldAvg*float64(obsCount) + newVal) / (float64(obsCount) + 1)
-}
-
 type result struct {
 	height uint64
-	failed bool
+	err    error
 }
 
 type listenFn func(ctx context.Context, height uint64)
@@ -59,7 +54,7 @@ type listenFn func(ctx context.Context, height uint64)
 func NewDASer(
 	da share.Availability,
 	hsub header.Subscriber,
-	getter header.Store,
+	getter header.Getter,
 	cstore datastore.Datastore,
 	bcast fraud.Broadcaster,
 ) *DASer {
@@ -71,6 +66,7 @@ func NewDASer(
 			getter: getter,
 			cstore: wrapCheckpointStore(cstore),
 		},
+		discoveryDone: make(chan struct{}),
 	}
 	d.sampler = newSamplingManager(concurrency, storeInterval, d.fetch, d.storeState)
 
@@ -94,11 +90,11 @@ func (d *DASer) Start(ctx context.Context) error {
 		h, err := d.getter.Head(ctx)
 		if err == nil {
 			checkpoint = checkPoint{
-				MinSampledHeight: 1,
-				MaxKnownHeight:   uint64(h.Height),
+				MinSampled: 1,
+				MaxKnown:   uint64(h.Height),
 			}
 
-			log.Warnw("set max known height from store", "height", checkpoint.MaxKnownHeight)
+			log.Warnw("set max known height from store", "height", checkpoint.MaxKnown)
 		}
 	}
 	log.Infow("loaded checkpoint", "height", checkpoint)
@@ -156,6 +152,10 @@ func (d *DASer) storeState(ctx context.Context, s state) {
 }
 
 func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) error {
+	if h == nil {
+		return nil
+	}
+
 	startTime := time.Now()
 
 	err := d.da.SharesAvailable(ctx, h.DAH)
@@ -216,7 +216,7 @@ func runWorker(ctx context.Context,
 		select {
 		case outCh <- result{
 			height: height,
-			failed: err != nil,
+			err:    err,
 		}:
 		case <-ctx.Done():
 			return
