@@ -54,7 +54,7 @@ func TestDASerLifecycle(t *testing.T) {
 		t.Fatal(ctx.Err())
 	case <-mockGet.doneCh:
 	}
-	// give catch-up routine a second to finish up sampling maxKnown header
+	// give catch-up routine a second to finish up sampling last header
 	assert.NoError(t, daser.sampler.waitCatchUp(ctx))
 }
 

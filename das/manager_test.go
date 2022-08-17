@@ -46,6 +46,7 @@ func TestManager(t *testing.T) {
 
 		assert.NoError(t, manager.stop(ctx))
 	})
+
 	t.Run("discovered new headers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

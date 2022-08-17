@@ -32,7 +32,7 @@ type Config struct {
 	cstore datastore.Datastore // checkpoint store
 }
 
-// DASer continuously validates availability of data committed maxKnown headers.
+// DASer continuously validates availability of data committed to headers.
 type DASer struct {
 	Config
 

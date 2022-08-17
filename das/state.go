@@ -6,7 +6,7 @@ type state struct {
 	inProgress map[uint64]bool // keeps track of inProgress item with priority flag stored as value
 	failed     map[uint64]int
 
-	priorityBusy bool // semaphore maxKnown limit only one priority maxKnown be processed at time
+	priorityBusy bool // semaphore to allow only one priority item to be processed at time
 
 	maxKnown   uint64 // max known header height
 	next       uint64 // all header before next were sampled, except ones that tracked in failed
@@ -65,7 +65,7 @@ func (s *state) updateMaxKnown(last uint64) bool {
 	return true
 }
 
-// nextHeight will return header height maxKnown be processed and done flog if there is none
+// nextHeight will return header height to be processed and done flog if there is none
 func (s *state) nextHeight() (next uint64, done bool) {
 	if !s.priorityBusy {
 		// select next height for priority worker

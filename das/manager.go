@@ -18,10 +18,10 @@ type samplingManager struct {
 	catchUpDoneCh chan struct{} // blocks until all headers are sampled
 
 	workersWg     sync.WaitGroup
-	jobsCh        chan uint64 // fan-out jobs maxKnown workers
-	resultCh      chan result // fan-in sampling results maxKnown worker maxKnown coordinator
+	jobsCh        chan uint64 // fan-out jobs to workers
+	resultCh      chan result // fan-in sampling results from worker to coordinator
 	discoveryCh   chan uint64 // receives all info about new headers discovery
-	storeCh       chan state  // communicates with backgroundStorer routine
+	storeCh       chan state  // communicates with backgroundStore routine
 	storeInterval time.Duration
 
 	coordinatorDone chan struct{}
@@ -54,7 +54,7 @@ func (sm *samplingManager) run(ctx context.Context, ch checkPoint) {
 	go sm.runCoordinator(ctx)
 	if sm.storeInterval > 0 {
 		// run store routine only when storeInterval is specified
-		go sm.runBackgroundStorer(ctx, sm.storeInterval)
+		go sm.runBackgroundStore(ctx, sm.storeInterval)
 	}
 
 	for i := 0; i < sm.concurrency; i++ {
@@ -124,8 +124,8 @@ func (sm *samplingManager) stop(ctx context.Context) error {
 	}
 }
 
-// BackgroundStorer periodically stores state to keep stored version up-to-date in case force quit happen
-func (sm *samplingManager) runBackgroundStorer(ctx context.Context, interval time.Duration) {
+// BackgroundStore periodically stores state to keep stored version up-to-date in case force quit happens
+func (sm *samplingManager) runBackgroundStore(ctx context.Context, interval time.Duration) {
 	storeTicker := time.NewTicker(interval)
 
 	for {

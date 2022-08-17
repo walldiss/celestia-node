@@ -10,7 +10,7 @@ import (
 // state collects information about the DASer process. Currently, there are
 // only two sampling routines: the main sampling routine which performs sampling
 // over current network headers, and the `catchUp` routine which performs sampling
-// over past headers from the maxKnown sampled checkpoint.
+// over past headers from the last sampled checkpoint.
 type stats struct {
 	sampleLk sync.RWMutex
 	sample   RoutineState // tracks information related to the main sampling routine

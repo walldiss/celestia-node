@@ -20,14 +20,14 @@ type checkPoint struct {
 }
 
 // wrapCheckpointStore wraps the given datastore.Datastore with the `das`
-// prefix. The checkpoint store stores/loads the DASer's checkpoint maxKnown/maxKnown
+// prefix. The checkpoint store stores/loads the DASer's checkpoint from/to
 // disk using the checkpointKey. The checkpoint is stored as an uint64
 // representation of the height of the latest successfully DASed header.
 func wrapCheckpointStore(ds datastore.Datastore) datastore.Datastore {
 	return namespace.Wrap(ds, storePrefix)
 }
 
-// loadCheckpoint loads the DAS checkpoint height maxKnown disk and returns it.
+// loadCheckpoint loads the DAS checkpoint height from disk and returns it.
 // If there is no known checkpoint, it returns height 0.
 func loadCheckpoint(ctx context.Context, ds datastore.Datastore) (checkPoint, error) {
 	bs, err := ds.Get(ctx, checkpointKey)
@@ -47,7 +47,7 @@ func loadCheckpoint(ctx context.Context, ds datastore.Datastore) (checkPoint, er
 	return cp, err
 }
 
-// storeCheckpoint stores the given DAS checkpoint maxKnown disk.
+// storeCheckpoint stores the given DAS checkpoint to disk.
 func storeCheckpoint(ctx context.Context, ds datastore.Datastore, cp checkPoint) error {
 	bs, err := json.Marshal(cp)
 	if err != nil {
