@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// samplingManager coordinates sampling workers and stores current state
 type samplingManager struct {
 	concurrency int
 	fetchFn     fetchFn
@@ -51,8 +52,7 @@ func newSamplingManager(concurrency int,
 
 func (sm *samplingManager) run(ctx context.Context, ch checkpoint) {
 	ctx, sm.cancel = context.WithCancel(ctx)
-
-	sm.state = ch.samplingState()
+	sm.state = ch.toSamplingState()
 
 	go sm.runCoordinator(ctx)
 	if sm.storeInterval > 0 {
@@ -60,12 +60,13 @@ func (sm *samplingManager) run(ctx context.Context, ch checkpoint) {
 		go sm.runBackgroundStore(ctx, sm.storeInterval)
 	}
 
+	// launch workers
 	for i := 0; i < sm.concurrency; i++ {
 		sm.workersWg.Add(1)
-		go func(num int) {
+		go func() {
 			defer sm.workersWg.Done()
-			runWorker(ctx, sm.jobsCh, sm.resultCh, sm.fetchFn, num)
-		}(i)
+			runWorker(ctx, sm.jobsCh, sm.resultCh, sm.fetchFn)
+		}()
 	}
 }
 
@@ -95,6 +96,7 @@ func (sm *samplingManager) runCoordinator(ctx context.Context) {
 			sm.state.handleResult(res)
 		case sm.storeCh <- *sm.state:
 		case <-ctx.Done():
+			// shutdown and indicate done
 			close(sm.jobsCh)
 			close(sm.coordinatorDone)
 			return
@@ -113,14 +115,14 @@ func (sm *samplingManager) stop(ctx context.Context) error {
 	}
 
 	// wait for all worker routines to finish
-	done := make(chan struct{})
+	workersDone := make(chan struct{})
 	go func() {
 		sm.workersWg.Wait()
-		close(done)
+		close(workersDone)
 	}()
 
 	select {
-	case <-done:
+	case <-workersDone:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -142,6 +144,7 @@ func (sm *samplingManager) runBackgroundStore(ctx context.Context, interval time
 
 		select {
 		case s := <-sm.storeCh:
+			// store only if minSampled is updated
 			if s.minSampled != prevMinSampled {
 				sm.storeState(ctx, s)
 				prevMinSampled = s.minSampled
@@ -165,6 +168,7 @@ func (sm *samplingManager) updateStats() {
 	}
 }
 
+// waitCatchUp waits for sampling process to finish catchup
 func (sm *samplingManager) waitCatchUp(ctx context.Context) error {
 	select {
 	case <-sm.catchUpDoneCh:
@@ -174,6 +178,7 @@ func (sm *samplingManager) waitCatchUp(ctx context.Context) error {
 	return nil
 }
 
+// listens for new headers to keep maxHeader up-to-date
 func (sm *samplingManager) listen(ctx context.Context, height uint64) {
 	select {
 	case sm.updMaxCh <- height:

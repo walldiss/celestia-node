@@ -146,10 +146,10 @@ func (d *DASer) storeState(ctx context.Context, s state) {
 	// store latest DASed checkpoint to disk here to ensure that if DASer is not yet
 	// fully caught up to network head, it will resume DASing from this checkpoint
 	// up to current network head
-	if err := storeCheckpoint(ctx, d.cstore, s.checkPoint()); err != nil {
+	if err := storeCheckpoint(ctx, d.cstore, s.toCheckPoint()); err != nil {
 		log.Errorw("storing checkpoint to disk", "err", err)
 	}
-	log.Infow("stored checkpoint to disk", "checkpoint", s.checkPoint())
+	log.Infow("stored checkpoint to disk", "checkpoint", s.toCheckPoint())
 }
 
 func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) error {
@@ -209,9 +209,7 @@ func (d *DASer) runSubscriber(ctx context.Context, sub header.Subscription, emit
 func runWorker(ctx context.Context,
 	inCh <-chan uint64,
 	outCh chan<- result,
-	fetch func(ctx2 context.Context, uint642 uint64) error,
-	num int) {
-	log.Infow("started worker ", "num", num)
+	fetch func(ctx2 context.Context, uint642 uint64) error) {
 
 	for height := range inCh {
 		err := fetch(ctx, height)
@@ -226,6 +224,7 @@ func runWorker(ctx context.Context,
 		}
 	}
 }
+
 func (d *DASer) SampleRoutineState() RoutineState {
 	return RoutineState{}
 }

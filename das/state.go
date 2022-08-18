@@ -3,18 +3,19 @@ package das
 // represents current state of sampling
 type state struct {
 	priority   []uint64        // list of headers heights that will be sampled with higher priority
-	inProgress map[uint64]bool // keeps track of inProgress item with priority flag stored as value
-	failed     map[uint64]int  // stores heights of failed headers with amount of attempt
+	inProgress map[uint64]bool // keeps track of inProgress items with priority flag stored as value
+	failed     map[uint64]int  // stores heights of failed headers with amount of attempt as value
 
 	priorityBusy bool // semaphore to allow only one priority item to be processed at time
 
 	maxKnown   uint64 // max known header height
-	next       uint64 // all header before next were sampled, except ones that tracked in failed
-	minSampled uint64 // tracks min sampled height
+	next       uint64 // all headers before next were sent to workers
+	minSampled uint64 // all headers before minSampled were successfully sampled
 }
 
 func (s *state) handleResult(res result) {
 	if s.inProgress[res.height] {
+		// unblock priority
 		s.priorityBusy = false
 	}
 
@@ -27,7 +28,7 @@ func (s *state) handleResult(res result) {
 	delete(s.inProgress, res.height)
 	delete(s.failed, res.height)
 
-	// set minSampled based on min non-failed done header
+	// set minSampled based on min non-failed and done header
 	for s.minSampled < s.next-1 {
 		if _, failed := s.failed[s.minSampled]; failed {
 			break
@@ -60,7 +61,7 @@ func (s *state) updateMaxKnown(last uint64) bool {
 		s.priority = append(s.priority, h)
 	}
 
-	log.Infow("added recent headers from DASer priority queue ", "from_height", from, "to_height", last)
+	log.Debug("added recent headers to DASer priority queue ", "from_height", from, "to_height", last)
 	s.maxKnown = last
 	return true
 }
@@ -92,6 +93,8 @@ func (s *state) nextHeight() (next uint64, done bool) {
 
 func (s *state) setBusy(next uint64) {
 	var fromPriority bool
+
+	// remove from priority
 	if len(s.priority) > 0 {
 		if next == s.priority[len(s.priority)-1] {
 			s.priority = s.priority[:len(s.priority)-1]
@@ -100,6 +103,7 @@ func (s *state) setBusy(next uint64) {
 		}
 	}
 
+	// update next if item wasn't from priority
 	if s.next == next {
 		s.next++
 	}
@@ -107,7 +111,7 @@ func (s *state) setBusy(next uint64) {
 	s.inProgress[next] = fromPriority
 }
 
-func (s *state) checkPoint() checkpoint {
+func (s *state) toCheckPoint() checkpoint {
 	return checkpoint{
 		MinSampled: s.minSampled,
 		MaxKnown:   s.maxKnown,
@@ -115,7 +119,7 @@ func (s *state) checkPoint() checkpoint {
 	}
 }
 
-func (c checkpoint) samplingState() *state {
+func (c checkpoint) toSamplingState() *state {
 	failed := c.Skipped
 	if failed == nil {
 		failed = make(map[uint64]int)
@@ -125,6 +129,7 @@ func (c checkpoint) samplingState() *state {
 	if c.MinSampled == 0 {
 		c.MinSampled = 1
 	}
+
 	return &state{
 		inProgress: make(map[uint64]bool),
 		maxKnown:   c.MaxKnown,

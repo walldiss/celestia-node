@@ -124,7 +124,7 @@ func TestManager(t *testing.T) {
 		fetcher := newMockFetcher(sampleFrom, maxKnown)
 		store := mockStore{T: t, expect: fetcher.finalState}
 
-		lk := newLock(sampleFrom, uint64(concurrency)) // lock all workers before start
+		lk := newLock(sampleFrom, sampleFrom+uint64(concurrency)) // lock all workers before start
 		manager := newSamplingManager(concurrency, 0, 0,
 			lk.middleWare(fetcher.fetch), store.store)
 		manager.run(ctx, fetcher.checkpoint)
@@ -416,5 +416,5 @@ func (m *mockStore) store(_ context.Context, s state) {
 	if len(expected.Skipped) == 0 {
 		expected.Skipped = make(map[uint64]int)
 	}
-	assert.Equal(m, expected, s.checkPoint())
+	assert.Equal(m, expected, s.toCheckPoint())
 }
