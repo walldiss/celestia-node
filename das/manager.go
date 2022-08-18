@@ -9,11 +9,10 @@ import (
 
 type samplingManager struct {
 	concurrency int
-	fetchFn     func(context.Context, uint64) error
-	storeState  func(context.Context, state)
+	fetchFn     fetchFn
+	storeState  storeFn
 	state       *state
 
-	//stats       atomic.Value
 	catchUpDone   int32         // indicates if all headers are sampled
 	catchUpDoneCh chan struct{} // blocks until all headers are sampled
 
@@ -28,15 +27,19 @@ type samplingManager struct {
 	cancel          context.CancelFunc
 }
 
+type fetchFn func(context.Context, uint64) error
+type storeFn func(context.Context, state)
+
 func newSamplingManager(concurrency int,
+	bufferSize int,
 	storeInterval time.Duration,
-	fetch func(context.Context, uint64) error,
-	storeFn func(context.Context, state)) *samplingManager {
+	fetch fetchFn,
+	storeFn storeFn) *samplingManager {
 	return &samplingManager{
 		concurrency:     concurrency,
 		fetchFn:         fetch,
 		storeState:      storeFn,
-		jobsCh:          make(chan uint64, 1),
+		jobsCh:          make(chan uint64, bufferSize),
 		resultCh:        make(chan result),
 		discoveryCh:     make(chan uint64),
 		storeCh:         make(chan state),
@@ -69,24 +72,24 @@ func (sm *samplingManager) run(ctx context.Context, ch checkPoint) {
 func (sm *samplingManager) runCoordinator(ctx context.Context) {
 	jobsCh := sm.jobsCh
 	noop := make(chan uint64)
-	next, done := sm.state.nextHeight()
 
+	var next uint64
+	var done bool
 	for {
 		sm.updateStats()
 
-		// if nothing to sample, don't send job to workers
-		if done {
+		if next, done = sm.state.nextHeight(); done {
+			// if nothing to sample, don't send job to workers
 			jobsCh = noop
 		}
 
 		select {
 		case jobsCh <- next:
-			next, done = sm.state.nextHeight()
+			sm.state.setBusy(next)
 		case last := <-sm.discoveryCh:
 			// if jobsCh was locked and discovery found new headers to sample unblock it
 			if sm.state.updateMaxKnown(last) && done {
 				jobsCh = sm.jobsCh
-				next, done = sm.state.nextHeight()
 			}
 		case res := <-sm.resultCh:
 			sm.state.handleResult(res)

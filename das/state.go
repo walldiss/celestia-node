@@ -60,7 +60,7 @@ func (s *state) updateMaxKnown(last uint64) bool {
 		s.priority = append(s.priority, h)
 	}
 
-	log.Infow("added recent headers maxKnown DASer priority queue ", "from_height", from, "to_height", last)
+	log.Infow("added recent headers from DASer priority queue ", "from_height", from, "to_height", last)
 	s.maxKnown = last
 	return true
 }
@@ -71,26 +71,40 @@ func (s *state) nextHeight() (next uint64, done bool) {
 		// select next height for priority worker
 		for len(s.priority) > 0 {
 			next = s.priority[len(s.priority)-1]
-			s.priority = s.priority[:len(s.priority)-1]
 
 			// skip all items lower than s.next to avoid double sampling,
 			//  since they were already processed by parallel workers
-			if next > s.next {
-				s.priorityBusy = true
-				s.inProgress[next] = true
-				return next, false
+			if next <= s.next {
+				s.priority = s.priority[:len(s.priority)-1]
+				continue
 			}
+
+			return next, false
 		}
 	}
 
 	if s.next <= s.maxKnown {
-		next = s.next
-		s.inProgress[next] = false
-		s.next++
-		return next, false
+		return s.next, false
 	}
 
 	return 0, true
+}
+
+func (s *state) setBusy(next uint64) {
+	var fromPriority bool
+	if len(s.priority) > 0 {
+		if next == s.priority[len(s.priority)-1] {
+			s.priority = s.priority[:len(s.priority)-1]
+			s.priorityBusy = true
+			fromPriority = true
+		}
+	}
+
+	if s.next == next {
+		s.next++
+	}
+
+	s.inProgress[next] = fromPriority
 }
 
 func (s *state) checkPoint() checkPoint {

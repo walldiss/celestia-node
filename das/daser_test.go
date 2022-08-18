@@ -158,107 +158,6 @@ func TestDASer_stopsAfter_BEFP(t *testing.T) {
 	require.True(t, daser.closed == 1)
 }
 
-//
-// func TestDASerState(t *testing.T) {
-//	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
-//	bServ := mdutils.Bserv()
-//
-//	// 30 headers in the past and 30 headers in the future (so final sample height should be 60)
-//	mockGet, shareServ, sub, fraud := createDASerSubcomponents(t, bServ, 30, 30, share.NewTestSuccessfulAvailability())
-//	expectedFinalSampleHeight := uint64(60)
-//	expectedFinalSampleWidth := uint64(len(sub.Headers[29].DAH.RowsRoots))
-//
-//	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-//	t.Cleanup(cancel)
-//
-//	daser := NewDASer(shareServ, sub, mockGet, ds, fraud)
-//	err := daser.Start(ctx)
-//	require.NoError(t, err)
-//	defer func() {
-//		// wait for all "future" headers to be sampled
-//		for {
-//			select {
-//			case <-ctx.Done():
-//				t.Fatal(ctx.Err())
-//			default:
-//				if daser.SampleRoutineState().LatestSampledHeight == expectedFinalSampleHeight {
-//					assert.Equal(t, expectedFinalSampleWidth, daser.SampleRoutineState().LatestSampledSquareWidth)
-//
-//					err := daser.Stop(ctx)
-//					require.NoError(t, err)
-//					assert.False(t, daser.SampleRoutineState().IsRunning)
-//					return
-//				}
-//			}
-//		}
-//	}()
-//	select {
-//	case <-ctx.Done():
-//		t.Fatal(ctx.Err())
-//	case <-mockGet.doneCh:
-//	}
-//	// give catchUp routine a second to exit
-//	for {
-//		select {
-//		case <-ctx.Done():
-//			t.Fatal(ctx.Err())
-//		default:
-//			if daser.CatchUpRoutineState().Finished() {
-//				return
-//			}
-//		}
-//	}
-//}
-//
-//// TestDASerState_WithErrorInCatchUp tests for the case where an
-//// error has occurred inside the catchUp routine, ensuring the catchUp
-//// routine exits as expected and reports the error accurately.
-//func TestDASerState_WithErrorInCatchUp(t *testing.T) {
-//	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
-//	bServ := mdutils.Bserv()
-//
-//	// 30 headers in the past and 30 headers in the future
-//	// catchUp routine error should occur at height 16
-//	brokenHeight := 16
-//	mockGet, shareServ, sub, fraud := createDASerWithFailingAvailability(t, bServ, 30, 30,
-//		int64(brokenHeight))
-//
-//	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-//	t.Cleanup(cancel)
-//
-//	daser := NewDASer(shareServ, sub, mockGet, ds, fraud)
-//	// allow catchUpDn signal to be read twice
-//	daser.catchUpDn = make(chan struct{}, 2)
-//
-//	err := daser.Start(ctx)
-//	require.NoError(t, err)
-//	defer func() {
-//		err = daser.Stop(ctx)
-//		require.NoError(t, err)
-//	}()
-//	// wait until catchUp routine has fetched the broken header
-//	select {
-//	case <-ctx.Done():
-//		t.Fatal(ctx.Err())
-//	case <-mockGet.brokenHeightCh:
-//	}
-//	// wait for daser to exit catchUp routine
-//	select {
-//	case <-ctx.Done():
-//		t.Fatal(ctx.Err())
-//	case <-daser.catchUpDn:
-//		catchUp := daser.CatchUpRoutineState()
-//		// make sure catchUp routine didn't successfully complete
-//		assert.False(t, catchUp.Finished())
-//		// ensure that the error has been reported
-//		assert.NotNil(t, catchUp.Error)
-//		assert.Equal(t, uint64(brokenHeight)-1, catchUp.Height)
-//		// send another done signal so `Stop` can read it
-//		daser.catchUpDn <- struct{}{}
-//		return
-//	}
-//}
-
 // createDASerSubcomponents takes numGetter (number of headers
 // to store in mockGetter) and numSub (number of headers to store
 // in the mock header.Subscriber), returning a newly instantiated
@@ -295,24 +194,6 @@ func createMockGetterAndSub(
 
 	return mockGet, sub
 }
-
-//
-//func createDASerWithFailingAvailability(
-//	t *testing.T,
-//	bServ blockservice.BlockService,
-//	numGetter,
-//	numSub int,
-//	brokenHeight int64,
-//) (*mockGetter, *share.Service, *header.DummySubscriber, *fraud.DummyService) {
-//	mockGet, sub := createMockGetterAndSub(t, bServ, numGetter, numSub)
-//	mockGet.brokenHeight = brokenHeight
-//
-//	shareServ := share.NewService(bServ, &share.TestBrokenAvailability{
-//		Root: mockGet.headers[brokenHeight].DAH,
-//	})
-//
-//	return mockGet, shareServ, sub, new(fraud.DummyService)
-//}
 
 // fillSubWithHeaders generates `num` headers from the future for p2pSub to pipe through to DASer.
 func (m *mockGetter) fillSubWithHeaders(

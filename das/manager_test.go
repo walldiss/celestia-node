@@ -2,6 +2,7 @@ package das
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -11,37 +12,28 @@ import (
 )
 
 func TestManager(t *testing.T) {
-	concurrency := 10
-
-	getter := mockGetter1{
-		checkPoint: checkPoint{
-			MinSampled: 1,
-			MaxKnown:   100,
-			Skipped:    nil,
-		},
-		done:       make(map[uint64]int),
-		finishedCh: make(chan struct{}),
-	}
-
-	finalState := getter.checkPoint
-	finalState.MinSampled = finalState.MaxKnown
-	store := mockStore{T: t, expect: getter.finalState}
+	concurrency := 100
+	maxKnown := uint64(10000)
+	sampleFrom := uint64(100)
 
 	t.Run("first run", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		manager := newSamplingManager(concurrency, 0, getter.fetch, store.store)
-		manager.run(ctx, getter.checkPoint)
+		fetcher := newMockFetcher(sampleFrom, maxKnown)
+		store := mockStore{T: t, expect: fetcher.finalState}
 
-		// wait for manager to finish checkup
+		manager := newSamplingManager(concurrency, 0, 0, fetcher.fetch, store.store)
+		manager.run(ctx, fetcher.checkPoint)
+
+		// wait for manager to finish catchup
 		assert.NoError(t, manager.waitCatchUp(ctx))
 
 		// check if all jobs were fetched successfully
 		select {
 		case <-ctx.Done():
 			assert.NoError(t, ctx.Err())
-		case <-getter.finishedCh:
+		case <-fetcher.finishedCh:
 		}
 
 		assert.NoError(t, manager.stop(ctx))
@@ -51,19 +43,75 @@ func TestManager(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		manager := newSamplingManager(concurrency, 0, getter.fetch, store.store)
-		manager.run(ctx, getter.checkPoint)
+		fetcher := newMockFetcher(sampleFrom, maxKnown)
+		store := mockStore{T: t, expect: fetcher.finalState}
+
+		manager := newSamplingManager(concurrency, 0, 0, fetcher.fetch, store.store)
+		manager.run(ctx, fetcher.checkPoint)
 
 		// discover new height
-		getter.discover(ctx, 160, manager.listen)
-		// wait for manager to finish checkup
+		fetcher.discover(ctx, maxKnown+1000, manager.listen)
+		// wait for manager to finish catchup
 		assert.NoError(t, manager.waitCatchUp(ctx))
 
 		// check if all jobs were fetched successfully
 		select {
 		case <-ctx.Done():
 			assert.NoError(t, ctx.Err())
-		case <-getter.finishedCh:
+		case <-fetcher.finishedCh:
+		}
+
+		assert.NoError(t, manager.stop(ctx))
+	})
+
+	t.Run("prioritize newly discovered over known", func(t *testing.T) {
+		maxKnown := uint64(10)
+		toBeDiscovered := uint64(20)
+		sampleFrom := uint64(1)
+
+		fetcher := newMockFetcher(sampleFrom, maxKnown)
+		store := mockStore{T: t, expect: fetcher.finalState}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// start manager with 1 routine in locked state
+		lk := newLock(sampleFrom, sampleFrom) // lock worker before start
+
+		// expect worker to prioritize newly discovered  (20 -> 10) and then old (0 -> 10)
+		order := newCheckOrder().
+			addInterval(sampleFrom, sampleFrom). // worker will pick up first job before discovery
+			addInterval(toBeDiscovered, maxKnown+1).
+			addInterval(sampleFrom+1, toBeDiscovered)
+
+		// start manager
+		manager := newSamplingManager(1, 0, 0,
+			lk.middleWare(
+				order.middleWare(
+					fetcher.fetch)),
+			store.store)
+		manager.run(ctx, fetcher.checkPoint)
+
+		// wait for worker to pick up first job
+		time.Sleep(time.Second)
+
+		// discover new height
+		fetcher.discover(ctx, 20, manager.listen)
+
+		// check if no header were sampled yet
+		assert.Equal(t, 0, fetcher.fetchedAmount())
+
+		// unblock worker
+		lk.release(sampleFrom)
+
+		// wait for manager to finish catchup
+		assert.NoError(t, manager.waitCatchUp(ctx))
+
+		// check if all jobs were fetched successfully
+		select {
+		case <-ctx.Done():
+			assert.NoError(t, ctx.Err())
+		case <-fetcher.finishedCh:
 		}
 
 		assert.NoError(t, manager.stop(ctx))
@@ -73,45 +121,107 @@ func TestManager(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		lk := newLock(1, uint64(concurrency)) // lock all workers before start
-		manager := newSamplingManager(concurrency, 0, lk.middleWare(getter.fetch), store.store)
-		manager.run(ctx, getter.checkPoint)
+		fetcher := newMockFetcher(sampleFrom, maxKnown)
+		store := mockStore{T: t, expect: fetcher.finalState}
 
-		// discover new height
-		getter.discover(ctx, 160, manager.listen)
+		lk := newLock(sampleFrom, uint64(concurrency)) // lock all workers before start
+		manager := newSamplingManager(concurrency, 0, 0,
+			lk.middleWare(fetcher.fetch), store.store)
+		manager.run(ctx, fetcher.checkPoint)
 
-		// check of no header were sampled yet
-		assert.Equal(t, 0, getter.fetchedAmount())
+		// discover new height and lock it
+		discovered := maxKnown + 1000
+		lk.add(discovered)
+		fetcher.discover(ctx, discovered, manager.listen)
 
-		lk.add(100)
-		// unblock 1 worker to let it
-		lk.release(1)
+		// check if no header were sampled yet
+		assert.Equal(t, 0, fetcher.fetchedAmount())
 
-		// wait for manager to finish checkup
-		assert.NoError(t, manager.waitCatchUp(ctx))
+		// unblock workers to resume sampling
+		lk.releaseAll(discovered)
+
+		// wait for manager to finish catchup
+		time.Sleep(time.Second)
+
+		// check that only last header is pending
+		assert.EqualValues(t, int(discovered-sampleFrom), fetcher.doneAmount())
+		assert.False(t, fetcher.checkDone(discovered))
+
+		lk.releaseAll()
+		// check if all jobs were fetched successfully
+		select {
+		case <-ctx.Done():
+			assert.NoError(t, ctx.Err())
+		case <-fetcher.finishedCh:
+		}
+
+		assert.NoError(t, manager.stop(ctx))
+	})
+
+	t.Run("failed should retry on restart", func(t *testing.T) {
+		sampleFrom := uint64(1)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		bornToFail := []uint64{4, 8, 15, 16, 23, 42}
+		fetcher := newMockFetcher(sampleFrom, maxKnown, bornToFail...)
+
+		expectedState := fetcher.finalState()
+		expectedState.MinSampled = bornToFail[0]
+		for _, h := range bornToFail {
+			expectedState.Skipped[h] = 1
+		}
+
+		store := mockStore{T: t, expect: func() checkPoint {
+			return expectedState
+		}}
+
+		manager := newSamplingManager(concurrency, 0, 0, fetcher.fetch, store.store)
+		manager.run(ctx, fetcher.checkPoint)
+
+		// wait for manager to finish catchup
+		time.Sleep(time.Second)
 
 		// check if all jobs were fetched successfully
 		select {
 		case <-ctx.Done():
 			assert.NoError(t, ctx.Err())
-		case <-getter.finishedCh:
+		case <-fetcher.finishedCh:
 		}
 
 		assert.NoError(t, manager.stop(ctx))
 	})
-	t.Run("failed should retry on restart", func(t *testing.T) {})
 }
 
-type mockGetter1 struct {
+type mockFetcher struct {
 	lock sync.Mutex
+
 	checkPoint
-	done map[uint64]int
+	bornToFail map[uint64]bool
+	done       map[uint64]int
 
 	finished   bool
 	finishedCh chan struct{}
 }
 
-func (m *mockGetter1) fetch(ctx context.Context, h uint64) error {
+func newMockFetcher(sampleFrom, sampleTo uint64, bornToFail ...uint64) mockFetcher {
+	failMap := make(map[uint64]bool)
+	for _, h := range bornToFail {
+		failMap[h] = true
+	}
+	return mockFetcher{
+		checkPoint: checkPoint{
+			MinSampled: sampleFrom,
+			MaxKnown:   sampleTo,
+			Skipped:    make(map[uint64]int),
+		},
+		bornToFail: failMap,
+		done:       make(map[uint64]int),
+		finishedCh: make(chan struct{}),
+	}
+}
+
+func (m *mockFetcher) fetch(ctx context.Context, h uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -128,10 +238,22 @@ func (m *mockGetter1) fetch(ctx context.Context, h uint64) error {
 		m.finished = true
 		close(m.finishedCh)
 	}
+
+	if m.bornToFail[h] {
+		return errors.New("born to fail, sad life")
+	}
 	return nil
 }
 
-func (m *mockGetter1) finalState() checkPoint {
+func (m *mockFetcher) checkDone(h uint64) bool {
+	return m.done[h] != 0
+}
+
+func (m *mockFetcher) doneAmount() int {
+	return len(m.done)
+}
+
+func (m *mockFetcher) finalState() checkPoint {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -140,36 +262,81 @@ func (m *mockGetter1) finalState() checkPoint {
 	return finalState
 }
 
-func (m *mockGetter1) discover(ctx context.Context, newHeight uint64, emit func(ctx context.Context, h uint64)) {
+func (m *mockFetcher) discover(ctx context.Context, newHeight uint64, emit func(ctx context.Context, h uint64)) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
+
 	m.checkPoint.MaxKnown = newHeight
 	m.finishedCh = make(chan struct{})
 	emit(ctx, newHeight)
 }
 
-func (m *mockGetter1) fetchedAmount() int {
+func (m *mockFetcher) fetchedAmount() int {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return len(m.done)
 }
 
-type mockStore struct {
-	*testing.T
-	expect func() checkPoint
+// ensures correct order of operations
+type checkOrder struct {
+	lock  sync.Mutex
+	queue []uint64
 }
 
-func (m *mockStore) store(_ context.Context, s state) {
-	expected := m.expect()
-	if len(expected.Skipped) == 0 {
-		expected.Skipped = make(map[uint64]int)
+func newCheckOrder() *checkOrder {
+	return &checkOrder{}
+}
+
+func (o *checkOrder) addInterval(start, end uint64) *checkOrder {
+	o.lock.Lock()
+	defer o.lock.Unlock()
+
+	if end > start {
+		for end >= start {
+			o.queue = append(o.queue, start)
+			start++
+		}
+		return o
 	}
-	assert.Equal(m, expected, s.checkPoint())
+
+	for start >= end {
+		o.queue = append(o.queue, start)
+		if start == 0 {
+			return o
+		}
+		start--
+
+	}
+	return o
 }
 
+func TestOrder(t *testing.T) {
+	o := newCheckOrder().addInterval(0, 3).addInterval(3, 0)
+	assert.Equal(t, []uint64{0, 1, 2, 3, 3, 2, 1, 0}, o.queue)
+}
+
+func (o *checkOrder) middleWare(out fetchFn) fetchFn {
+	return func(ctx context.Context, h uint64) error {
+		o.lock.Lock()
+
+		if len(o.queue) > 0 {
+			// check last item in queue to be same as input
+			if o.queue[0] != h {
+				o.lock.Unlock()
+				return fmt.Errorf("expected height: %v,got: %v", o.queue[len(o.queue)-1], h)
+			}
+			o.queue = o.queue[1:]
+		}
+
+		o.lock.Unlock()
+		return out(ctx, h)
+	}
+}
+
+// blocks operations if item is in lock list
 type lock struct {
 	m         sync.Mutex
-	blockList map[uint64]chan struct{} // all fetch calls will be blocked if item is in lock list
+	blockList map[uint64]chan struct{}
 }
 
 func newLock(from, to uint64) *lock {
@@ -183,32 +350,53 @@ func newLock(from, to uint64) *lock {
 	}
 }
 
-func (l *lock) add(h uint64) {
+func (l *lock) add(hs ...uint64) {
 	l.m.Lock()
 	defer l.m.Unlock()
-	l.blockList[h] = make(chan struct{})
+	for _, h := range hs {
+		l.blockList[h] = make(chan struct{})
+	}
 }
 
-func (l *lock) release(h uint64) {
+func (l *lock) release(hs ...uint64) {
 	l.m.Lock()
 	defer l.m.Unlock()
 
-	if ch, ok := l.blockList[h]; ok {
+	for _, h := range hs {
+		if ch, ok := l.blockList[h]; ok {
+			close(ch)
+			delete(l.blockList, h)
+		}
+	}
+}
+
+func (l *lock) releaseAll(except ...uint64) {
+	m := make(map[uint64]bool)
+	for _, h := range except {
+		m[h] = true
+	}
+
+	l.m.Lock()
+	defer l.m.Unlock()
+
+	for h, ch := range l.blockList {
+		if m[h] {
+			continue
+		}
 		close(ch)
 		delete(l.blockList, h)
 	}
 }
 
-func (l *lock) middleWare(out func(ctx context.Context, h uint64) error) func(ctx context.Context, h uint64) error {
+func (l *lock) middleWare(out fetchFn) fetchFn {
 	return func(ctx context.Context, h uint64) error {
 		l.m.Lock()
-		defer l.m.Unlock()
-
-		if _, blocked := l.blockList[h]; !blocked {
+		ch, blocked := l.blockList[h]
+		l.m.Unlock()
+		if !blocked {
 			return out(ctx, h)
 		}
 
-		ch := l.blockList[h]
 		select {
 		case <-ch:
 			return out(ctx, h)
@@ -216,4 +404,17 @@ func (l *lock) middleWare(out func(ctx context.Context, h uint64) error) func(ct
 			return ctx.Err()
 		}
 	}
+}
+
+type mockStore struct {
+	*testing.T
+	expect func() checkPoint
+}
+
+func (m *mockStore) store(_ context.Context, s state) {
+	expected := m.expect()
+	if len(expected.Skipped) == 0 {
+		expected.Skipped = make(map[uint64]int)
+	}
+	assert.Equal(m, expected, s.checkPoint())
 }

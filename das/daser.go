@@ -21,6 +21,7 @@ var log = logging.Logger("das")
 const (
 	priorityLimit = 1024
 	concurrency   = 256 //TODO: move to config?
+	bufferSize    = 16
 	storeInterval = time.Minute
 )
 
@@ -68,7 +69,7 @@ func NewDASer(
 		},
 		discoveryDone: make(chan struct{}),
 	}
-	d.sampler = newSamplingManager(concurrency, storeInterval, d.fetch, d.storeState)
+	d.sampler = newSamplingManager(concurrency, bufferSize, storeInterval, d.fetch, d.storeState)
 
 	return d
 }
