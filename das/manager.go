@@ -19,7 +19,7 @@ type samplingManager struct {
 	workersWg     sync.WaitGroup
 	jobsCh        chan uint64 // fan-out jobs to workers
 	resultCh      chan result // fan-in sampling results from worker to coordinator
-	discoveryCh   chan uint64 // receives all info about new headers discovery
+	updMaxCh      chan uint64 // signals to update max known header height
 	storeCh       chan state  // communicates with backgroundStore routine
 	storeInterval time.Duration
 
@@ -41,7 +41,7 @@ func newSamplingManager(concurrency int,
 		storeState:      storeFn,
 		jobsCh:          make(chan uint64, bufferSize),
 		resultCh:        make(chan result),
-		discoveryCh:     make(chan uint64),
+		updMaxCh:        make(chan uint64),
 		storeCh:         make(chan state),
 		storeInterval:   storeInterval,
 		coordinatorDone: make(chan struct{}),
@@ -49,7 +49,7 @@ func newSamplingManager(concurrency int,
 	}
 }
 
-func (sm *samplingManager) run(ctx context.Context, ch checkPoint) {
+func (sm *samplingManager) run(ctx context.Context, ch checkpoint) {
 	ctx, sm.cancel = context.WithCancel(ctx)
 
 	sm.state = ch.samplingState()
@@ -86,9 +86,9 @@ func (sm *samplingManager) runCoordinator(ctx context.Context) {
 		select {
 		case jobsCh <- next:
 			sm.state.setBusy(next)
-		case last := <-sm.discoveryCh:
-			// if jobsCh was locked and discovery found new headers to sample unblock it
-			if sm.state.updateMaxKnown(last) && done {
+		case max := <-sm.updMaxCh:
+			if sm.state.updateMaxKnown(max) && done {
+				// if found new headers to sample and jobsCh was locked - unblock it
 				jobsCh = sm.jobsCh
 			}
 		case res := <-sm.resultCh:
@@ -131,6 +131,7 @@ func (sm *samplingManager) stop(ctx context.Context) error {
 func (sm *samplingManager) runBackgroundStore(ctx context.Context, interval time.Duration) {
 	storeTicker := time.NewTicker(interval)
 
+	var prevMinSampled uint64
 	for {
 		// blocked by ticker to perform store only once in period of time
 		select {
@@ -141,7 +142,10 @@ func (sm *samplingManager) runBackgroundStore(ctx context.Context, interval time
 
 		select {
 		case s := <-sm.storeCh:
-			sm.storeState(ctx, s)
+			if s.minSampled != prevMinSampled {
+				sm.storeState(ctx, s)
+				prevMinSampled = s.minSampled
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -172,7 +176,7 @@ func (sm *samplingManager) waitCatchUp(ctx context.Context) error {
 
 func (sm *samplingManager) listen(ctx context.Context, height uint64) {
 	select {
-	case sm.discoveryCh <- height:
+	case sm.updMaxCh <- height:
 	case <-ctx.Done():
 	}
 }

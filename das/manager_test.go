@@ -24,7 +24,7 @@ func TestManager(t *testing.T) {
 		store := mockStore{T: t, expect: fetcher.finalState}
 
 		manager := newSamplingManager(concurrency, 0, 0, fetcher.fetch, store.store)
-		manager.run(ctx, fetcher.checkPoint)
+		manager.run(ctx, fetcher.checkpoint)
 
 		// wait for manager to finish catchup
 		assert.NoError(t, manager.waitCatchUp(ctx))
@@ -47,7 +47,7 @@ func TestManager(t *testing.T) {
 		store := mockStore{T: t, expect: fetcher.finalState}
 
 		manager := newSamplingManager(concurrency, 0, 0, fetcher.fetch, store.store)
-		manager.run(ctx, fetcher.checkPoint)
+		manager.run(ctx, fetcher.checkpoint)
 
 		// discover new height
 		fetcher.discover(ctx, maxKnown+1000, manager.listen)
@@ -90,7 +90,7 @@ func TestManager(t *testing.T) {
 				order.middleWare(
 					fetcher.fetch)),
 			store.store)
-		manager.run(ctx, fetcher.checkPoint)
+		manager.run(ctx, fetcher.checkpoint)
 
 		// wait for worker to pick up first job
 		time.Sleep(time.Second)
@@ -127,7 +127,7 @@ func TestManager(t *testing.T) {
 		lk := newLock(sampleFrom, uint64(concurrency)) // lock all workers before start
 		manager := newSamplingManager(concurrency, 0, 0,
 			lk.middleWare(fetcher.fetch), store.store)
-		manager.run(ctx, fetcher.checkPoint)
+		manager.run(ctx, fetcher.checkpoint)
 
 		// discover new height and lock it
 		discovered := maxKnown + 1000
@@ -172,12 +172,12 @@ func TestManager(t *testing.T) {
 			expectedState.Skipped[h] = 1
 		}
 
-		store := mockStore{T: t, expect: func() checkPoint {
+		store := mockStore{T: t, expect: func() checkpoint {
 			return expectedState
 		}}
 
 		manager := newSamplingManager(concurrency, 0, 0, fetcher.fetch, store.store)
-		manager.run(ctx, fetcher.checkPoint)
+		manager.run(ctx, fetcher.checkpoint)
 
 		// wait for manager to finish catchup
 		time.Sleep(time.Second)
@@ -196,7 +196,7 @@ func TestManager(t *testing.T) {
 type mockFetcher struct {
 	lock sync.Mutex
 
-	checkPoint
+	checkpoint
 	bornToFail map[uint64]bool
 	done       map[uint64]int
 
@@ -210,7 +210,7 @@ func newMockFetcher(sampleFrom, sampleTo uint64, bornToFail ...uint64) mockFetch
 		failMap[h] = true
 	}
 	return mockFetcher{
-		checkPoint: checkPoint{
+		checkpoint: checkpoint{
 			MinSampled: sampleFrom,
 			MaxKnown:   sampleTo,
 			Skipped:    make(map[uint64]int),
@@ -253,11 +253,11 @@ func (m *mockFetcher) doneAmount() int {
 	return len(m.done)
 }
 
-func (m *mockFetcher) finalState() checkPoint {
+func (m *mockFetcher) finalState() checkpoint {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	finalState := m.checkPoint
+	finalState := m.checkpoint
 	finalState.MinSampled = finalState.MaxKnown
 	return finalState
 }
@@ -266,7 +266,7 @@ func (m *mockFetcher) discover(ctx context.Context, newHeight uint64, emit func(
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	m.checkPoint.MaxKnown = newHeight
+	m.checkpoint.MaxKnown = newHeight
 	m.finishedCh = make(chan struct{})
 	emit(ctx, newHeight)
 }
@@ -408,7 +408,7 @@ func (l *lock) middleWare(out fetchFn) fetchFn {
 
 type mockStore struct {
 	*testing.T
-	expect func() checkPoint
+	expect func() checkpoint
 }
 
 func (m *mockStore) store(_ context.Context, s state) {

@@ -16,7 +16,7 @@ func TestCheckpointStore(t *testing.T) {
 	skipped := make(map[uint64]int)
 	skipped[2] = 1
 	skipped[3] = 2
-	checkpoint := checkPoint{
+	checkpoint := checkpoint{
 		MinSampled: 1,
 		MaxKnown:   6,
 		Skipped:    skipped,

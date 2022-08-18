@@ -19,10 +19,10 @@ import (
 var log = logging.Logger("das")
 
 const (
-	priorityLimit = 1024
-	concurrency   = 256 //TODO: move to config?
-	bufferSize    = 16
-	storeInterval = time.Minute
+	priorityBufferSize = 1024
+	concurrency        = 256
+	jobsBufferSize     = 16
+	storeInterval      = 10 * time.Minute
 )
 
 type Config struct {
@@ -39,9 +39,9 @@ type DASer struct {
 
 	sampler *samplingManager
 
-	cancel        context.CancelFunc
-	discoveryDone chan struct{}
-	closed        int32
+	cancel         context.CancelFunc
+	subscriberDone chan struct{}
+	closed         int32
 }
 
 type result struct {
@@ -67,9 +67,9 @@ func NewDASer(
 			getter: getter,
 			cstore: wrapCheckpointStore(cstore),
 		},
-		discoveryDone: make(chan struct{}),
+		subscriberDone: make(chan struct{}),
 	}
-	d.sampler = newSamplingManager(concurrency, bufferSize, storeInterval, d.fetch, d.storeState)
+	d.sampler = newSamplingManager(concurrency, jobsBufferSize, storeInterval, d.fetch, d.storeState)
 
 	return d
 }
@@ -86,26 +86,26 @@ func (d *DASer) Start(ctx context.Context) error {
 	}
 
 	// load latest DASed checkpoint
-	checkpoint, err := loadCheckpoint(ctx, d.cstore)
+	cp, err := loadCheckpoint(ctx, d.cstore)
 	if err != nil {
 		h, err := d.getter.Head(ctx)
 		if err == nil {
-			checkpoint = checkPoint{
+			cp = checkpoint{
 				MinSampled: 1,
 				MaxKnown:   uint64(h.Height),
 			}
 
-			log.Warnw("set max known height from store", "height", checkpoint.MaxKnown)
+			log.Warnw("set max known height from store", "height", cp.MaxKnown)
 		}
 	}
-	log.Infow("loaded checkpoint", "height", checkpoint)
+	log.Infow("loaded checkpoint", "height", cp)
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 
-	go d.sampler.run(runCtx, checkpoint)
-	// discover new headers
-	go d.runDiscovery(runCtx, sub, d.sampler.listen)
+	go d.sampler.run(runCtx, cp)
+	// subscribe to new headers
+	go d.runSubscriber(runCtx, sub, d.sampler.listen)
 
 	return nil
 }
@@ -123,9 +123,9 @@ func (d *DASer) Stop(ctx context.Context) error {
 			return err
 		}
 
-		// wait for discovery to quit
+		// wait for subscriber to quit
 		select {
-		case <-d.discoveryDone:
+		case <-d.subscriberDone:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
@@ -185,20 +185,22 @@ func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) erro
 	return nil
 }
 
-func (d *DASer) runDiscovery(ctx context.Context, sub header.Subscription, emit listenFn) {
+func (d *DASer) runSubscriber(ctx context.Context, sub header.Subscription, emit listenFn) {
+	defer sub.Cancel()
+
 	for {
-		// discover new headers to keep sampling process up-to-date with current network state
+		// subscribe for new headers to keep sampling process up-to-date with current network state
 		h, err := sub.NextHeader(ctx)
 		if err != nil {
 			if err == context.Canceled {
-				close(d.discoveryDone)
+				close(d.subscriberDone)
 				return
 			}
 
 			log.Errorw("failed to get next header", "err", err)
 			continue
 		}
-		log.Infow("discovered new header", "height", h.Height)
+		log.Infow("found new header", "height", h.Height)
 
 		emit(ctx, uint64(h.Height))
 	}

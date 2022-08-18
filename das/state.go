@@ -4,7 +4,7 @@ package das
 type state struct {
 	priority   []uint64        // list of headers heights that will be sampled with higher priority
 	inProgress map[uint64]bool // keeps track of inProgress item with priority flag stored as value
-	failed     map[uint64]int
+	failed     map[uint64]int  // stores heights of failed headers with amount of attempt
 
 	priorityBusy bool // semaphore to allow only one priority item to be processed at time
 
@@ -45,17 +45,17 @@ func (s *state) updateMaxKnown(last uint64) bool {
 		return false
 	}
 
-	if s.maxKnown == 0 {
-		log.Infow("discovered first header, starting sampling")
+	if s.maxKnown == 1 {
+		log.Infow("found first header, starting sampling")
 	}
 
 	// add most recent headers that fit into priority queue without overflowing it
 	from := s.maxKnown
-	spaceInQueue := priorityLimit - uint64(len(s.priority))
+	spaceInQueue := priorityBufferSize - uint64(len(s.priority))
 	if last-from > spaceInQueue {
 		from = last - spaceInQueue
 	}
-	// put newly discovered heights with the highest priority
+	// put recent heights with the highest priority
 	for h := from; h <= last; h++ {
 		s.priority = append(s.priority, h)
 	}
@@ -107,18 +107,23 @@ func (s *state) setBusy(next uint64) {
 	s.inProgress[next] = fromPriority
 }
 
-func (s *state) checkPoint() checkPoint {
-	return checkPoint{
+func (s *state) checkPoint() checkpoint {
+	return checkpoint{
 		MinSampled: s.minSampled,
 		MaxKnown:   s.maxKnown,
 		Skipped:    s.failed,
 	}
 }
 
-func (c checkPoint) samplingState() *state {
+func (c checkpoint) samplingState() *state {
 	failed := c.Skipped
 	if failed == nil {
 		failed = make(map[uint64]int)
+	}
+
+	// start from 1
+	if c.MinSampled == 0 {
+		c.MinSampled = 1
 	}
 	return &state{
 		inProgress: make(map[uint64]bool),
