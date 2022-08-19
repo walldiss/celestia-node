@@ -2,9 +2,9 @@ package das
 
 // represents current state of sampling
 type state struct {
-	priority   []uint64        // list of headers heights that will be sampled with higher priority
-	inProgress map[uint64]bool // keeps track of inProgress items with priority flag stored as value
-	failed     map[uint64]int  // stores heights of failed headers with amount of attempt as value
+	priority   []uint64            // list of headers heights that will be sampled with higher priority
+	inProgress map[uint64]struct{} // keeps track of inProgress items
+	failed     map[uint64]int      // stores heights of failed headers with amount of attempt as value
 
 	priorityBusy bool // semaphore to allow only one priority item to be processed at time
 
@@ -14,11 +14,6 @@ type state struct {
 }
 
 func (s *state) handleResult(res result) {
-	if s.inProgress[res.height] {
-		// unblock priority
-		s.priorityBusy = false
-	}
-
 	//TODO: no handling, no retry. just store retry stats for now
 	if res.err != nil {
 		s.failed[res.height]++
@@ -42,7 +37,7 @@ func (s *state) handleResult(res result) {
 
 func (s *state) updateMaxKnown(last uint64) bool {
 	// seen this header before
-	if last == s.maxKnown {
+	if last <= s.maxKnown {
 		return false
 	}
 
@@ -68,20 +63,18 @@ func (s *state) updateMaxKnown(last uint64) bool {
 
 // nextHeight will return header height to be processed and done flog if there is none
 func (s *state) nextHeight() (next uint64, done bool) {
-	if !s.priorityBusy {
-		// select next height for priority worker
-		for len(s.priority) > 0 {
-			next = s.priority[len(s.priority)-1]
+	// select next height for priority worker
+	for len(s.priority) > 0 {
+		next = s.priority[len(s.priority)-1]
 
-			// skip all items lower than s.next to avoid double sampling,
-			//  since they were already processed by parallel workers
-			if next <= s.next {
-				s.priority = s.priority[:len(s.priority)-1]
-				continue
-			}
-
-			return next, false
+		// skip all items lower than s.next to avoid double sampling,
+		//  since they were already processed by parallel workers
+		if next <= s.next {
+			s.priority = s.priority[:len(s.priority)-1]
+			continue
 		}
+
+		return next, false
 	}
 
 	if s.next <= s.maxKnown {
@@ -92,14 +85,10 @@ func (s *state) nextHeight() (next uint64, done bool) {
 }
 
 func (s *state) setBusy(next uint64) {
-	var fromPriority bool
-
 	// remove from priority
 	if len(s.priority) > 0 {
 		if next == s.priority[len(s.priority)-1] {
 			s.priority = s.priority[:len(s.priority)-1]
-			s.priorityBusy = true
-			fromPriority = true
 		}
 	}
 
@@ -108,7 +97,7 @@ func (s *state) setBusy(next uint64) {
 		s.next++
 	}
 
-	s.inProgress[next] = fromPriority
+	s.inProgress[next] = struct{}{}
 }
 
 func (s *state) toCheckPoint() checkpoint {
@@ -119,7 +108,7 @@ func (s *state) toCheckPoint() checkpoint {
 	}
 }
 
-func (c checkpoint) toSamplingState() *state {
+func (c checkpoint) toSamplingState() state {
 	failed := c.Skipped
 	if failed == nil {
 		failed = make(map[uint64]int)
@@ -130,8 +119,8 @@ func (c checkpoint) toSamplingState() *state {
 		c.MinSampled = 1
 	}
 
-	return &state{
-		inProgress: make(map[uint64]bool),
+	return state{
+		inProgress: make(map[uint64]struct{}),
 		maxKnown:   c.MaxKnown,
 		next:       c.MinSampled,
 		minSampled: c.MinSampled,

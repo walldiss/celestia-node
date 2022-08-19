@@ -2,6 +2,7 @@ package das
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,7 +13,7 @@ type samplingManager struct {
 	concurrency int
 	fetchFn     fetchFn
 	storeState  storeFn
-	state       *state
+	state       state
 
 	catchUpDone   int32         // indicates if all headers are sampled
 	catchUpDoneCh chan struct{} // blocks until all headers are sampled
@@ -24,8 +25,9 @@ type samplingManager struct {
 	storeCh       chan state  // communicates with backgroundStore routine
 	storeInterval time.Duration
 
-	coordinatorDone chan struct{}
-	cancel          context.CancelFunc
+	coordinatorDone     chan struct{}
+	backgroundStoreDone chan struct{}
+	cancel              context.CancelFunc
 }
 
 type fetchFn func(context.Context, uint64) error
@@ -37,16 +39,17 @@ func newSamplingManager(concurrency int,
 	fetch fetchFn,
 	storeFn storeFn) *samplingManager {
 	return &samplingManager{
-		concurrency:     concurrency,
-		fetchFn:         fetch,
-		storeState:      storeFn,
-		jobsCh:          make(chan uint64, bufferSize),
-		resultCh:        make(chan result),
-		updMaxCh:        make(chan uint64),
-		storeCh:         make(chan state),
-		storeInterval:   storeInterval,
-		coordinatorDone: make(chan struct{}),
-		catchUpDoneCh:   make(chan struct{}),
+		concurrency:         concurrency,
+		fetchFn:             fetch,
+		storeState:          storeFn,
+		jobsCh:              make(chan uint64, bufferSize),
+		resultCh:            make(chan result),
+		updMaxCh:            make(chan uint64),
+		storeCh:             make(chan state),
+		storeInterval:       storeInterval,
+		coordinatorDone:     make(chan struct{}),
+		backgroundStoreDone: make(chan struct{}),
+		catchUpDoneCh:       make(chan struct{}),
 	}
 }
 
@@ -55,10 +58,7 @@ func (sm *samplingManager) run(ctx context.Context, ch checkpoint) {
 	sm.state = ch.toSamplingState()
 
 	go sm.runCoordinator(ctx)
-	if sm.storeInterval > 0 {
-		// run store routine only when storeInterval is specified
-		go sm.runBackgroundStore(ctx, sm.storeInterval)
-	}
+	go sm.runBackgroundStore(ctx, sm.storeInterval)
 
 	// launch workers
 	for i := 0; i < sm.concurrency; i++ {
@@ -72,16 +72,15 @@ func (sm *samplingManager) run(ctx context.Context, ch checkpoint) {
 
 func (sm *samplingManager) runCoordinator(ctx context.Context) {
 	jobsCh := sm.jobsCh
-	noop := make(chan uint64)
-
 	var next uint64
 	var done bool
+
 	for {
 		sm.updateStats()
 
 		if next, done = sm.state.nextHeight(); done {
 			// if nothing to sample, don't send job to workers
-			jobsCh = noop
+			jobsCh = nil
 		}
 
 		select {
@@ -94,7 +93,7 @@ func (sm *samplingManager) runCoordinator(ctx context.Context) {
 			}
 		case res := <-sm.resultCh:
 			sm.state.handleResult(res)
-		case sm.storeCh <- *sm.state:
+		case sm.storeCh <- sm.state:
 		case <-ctx.Done():
 			// shutdown and indicate done
 			close(sm.jobsCh)
@@ -109,9 +108,16 @@ func (sm *samplingManager) stop(ctx context.Context) error {
 	// wait for coordinator to exit and store state
 	select {
 	case <-sm.coordinatorDone:
-		sm.storeState(ctx, *sm.state)
+		sm.storeState(ctx, sm.state)
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("coordinator stuck: %w", ctx.Err())
+	}
+
+	// wait for background store to exit
+	select {
+	case <-sm.backgroundStoreDone:
+	case <-ctx.Done():
+		return fmt.Errorf("background store stuck: %w", ctx.Err())
 	}
 
 	// wait for all worker routines to finish
@@ -125,12 +131,18 @@ func (sm *samplingManager) stop(ctx context.Context) error {
 	case <-workersDone:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return fmt.Errorf("workers stuck: %w", ctx.Err())
 	}
 }
 
 // BackgroundStore periodically stores state to keep stored version up-to-date in case force quit happens
 func (sm *samplingManager) runBackgroundStore(ctx context.Context, interval time.Duration) {
+	defer close(sm.backgroundStoreDone)
+
+	if sm.storeInterval == 0 {
+		// run store routine only when storeInterval is specified
+		return
+	}
 	storeTicker := time.NewTicker(interval)
 
 	var prevMinSampled uint64

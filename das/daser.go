@@ -25,17 +25,13 @@ const (
 	storeInterval      = 10 * time.Minute
 )
 
-type Config struct {
+// DASer continuously validates availability of data committed to headers.
+type DASer struct {
 	da     share.Availability
 	bcast  fraud.Broadcaster
 	hsub   header.Subscriber   // listens for new headers in the network
 	getter header.Getter       // retrieves past headers
 	cstore datastore.Datastore // checkpoint store
-}
-
-// DASer continuously validates availability of data committed to headers.
-type DASer struct {
-	Config
 
 	sampler *samplingManager
 
@@ -60,13 +56,11 @@ func NewDASer(
 	bcast fraud.Broadcaster,
 ) *DASer {
 	d := &DASer{
-		Config: Config{
-			da:     da,
-			bcast:  bcast,
-			hsub:   hsub,
-			getter: getter,
-			cstore: wrapCheckpointStore(cstore),
-		},
+		da:             da,
+		bcast:          bcast,
+		hsub:           hsub,
+		getter:         getter,
+		cstore:         wrapCheckpointStore(cstore),
 		subscriberDone: make(chan struct{}),
 	}
 	d.sampler = newSamplingManager(concurrency, jobsBufferSize, storeInterval, d.fetch, d.storeState)
@@ -118,7 +112,7 @@ func (d *DASer) Stop(ctx context.Context) error {
 		// shutdown the sampler
 		if err := d.sampler.stop(ctx); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return errors.New("DASer force quit")
+				return fmt.Errorf("DASer force quit: %w", err)
 			}
 			return err
 		}
