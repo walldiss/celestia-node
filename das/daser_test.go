@@ -55,7 +55,7 @@ func TestDASerLifecycle(t *testing.T) {
 	case <-mockGet.doneCh:
 	}
 	// give catch-up routine a second to finish up sampling last header
-	assert.NoError(t, daser.sampler.waitCatchUp(ctx))
+	assert.NoError(t, daser.sampler.state.waitCatchUp(ctx))
 }
 
 func TestDASer_Restart(t *testing.T) {
@@ -88,7 +88,7 @@ func TestDASer_Restart(t *testing.T) {
 	mockGet.doneCh = make(chan struct{})
 	// reset dummy subscriber
 	mockGet.fillSubWithHeaders(t, sub, bServ, 45, 60)
-	// manually set mockGet head to trigger stop at 45
+	// manually set mockGet head to trigger finished at 45
 	mockGet.head = int64(45)
 
 	// restart DASer with new context
@@ -106,7 +106,7 @@ func TestDASer_Restart(t *testing.T) {
 	case <-mockGet.doneCh:
 	}
 
-	assert.NoError(t, daser.sampler.waitCatchUp(ctx))
+	assert.NoError(t, daser.sampler.state.waitCatchUp(ctx))
 	err = daser.Stop(restartCtx)
 	require.NoError(t, err)
 
@@ -255,9 +255,17 @@ func (m *mockGetter) GetByHeight(_ context.Context, height uint64) (*header.Exte
 	defer func() {
 		switch int64(height) {
 		case m.brokenHeight:
-			close(m.brokenHeightCh)
+			select {
+			case <-m.brokenHeightCh:
+			default:
+				close(m.brokenHeightCh)
+			}
 		case m.head:
-			close(m.doneCh)
+			select {
+			case <-m.doneCh:
+			default:
+				close(m.doneCh)
+			}
 		}
 	}()
 

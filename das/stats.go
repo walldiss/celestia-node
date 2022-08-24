@@ -1,7 +1,6 @@
 package das
 
 import (
-	"sync"
 	"time"
 )
 
@@ -12,11 +11,9 @@ import (
 // over current network headers, and the `catchUp` routine which performs sampling
 // over past headers from the last sampled checkpoint.
 type stats struct {
-	sampleLk sync.RWMutex
-	sample   RoutineState // tracks information related to the main sampling routine
-
-	catchUpLk sync.RWMutex
-	catchUp   JobInfo // tracks information related to the `catchUp` routine
+	State checkpoint `json:"state"`
+	// tracks whether routine is running
+	IsRunning bool `json:"is_running"`
 }
 
 // RoutineState contains important information about the state of a

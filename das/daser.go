@@ -19,10 +19,8 @@ import (
 var log = logging.Logger("das")
 
 const (
-	priorityBufferSize = 1024
-	concurrency        = 256
-	jobsBufferSize     = 16
-	storeInterval      = 10 * time.Minute
+	samplingRange = 1
+	concurrency   = 256
 )
 
 // DASer continuously validates availability of data committed to headers.
@@ -38,11 +36,6 @@ type DASer struct {
 	cancel         context.CancelFunc
 	subscriberDone chan struct{}
 	closed         int32
-}
-
-type result struct {
-	height uint64
-	err    error
 }
 
 type listenFn func(ctx context.Context, height uint64)
@@ -63,7 +56,7 @@ func NewDASer(
 		cstore:         wrapCheckpointStore(cstore),
 		subscriberDone: make(chan struct{}),
 	}
-	d.sampler = newSamplingManager(concurrency, jobsBufferSize, storeInterval, d.fetch, d.storeState)
+	d.sampler = newSamplingManager(concurrency, d.fetch, d.storeCheckpount)
 
 	return d
 }
@@ -94,10 +87,12 @@ func (d *DASer) Start(ctx context.Context) error {
 	}
 	log.Infow("loaded checkpoint", "height", cp)
 
+	d.sampler.state = initSamplingState(samplingRange, cp)
+
 	runCtx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 
-	go d.sampler.run(runCtx, cp)
+	go d.sampler.runCoordinator(runCtx)
 	// subscribe to new headers
 	go d.runSubscriber(runCtx, sub, d.sampler.listen)
 
@@ -110,7 +105,7 @@ func (d *DASer) Stop(ctx context.Context) error {
 		d.cancel()
 
 		// shutdown the sampler
-		if err := d.sampler.stop(ctx); err != nil {
+		if err := d.sampler.finished(ctx); err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("DASer force quit: %w", err)
 			}
@@ -130,20 +125,22 @@ func (d *DASer) Stop(ctx context.Context) error {
 func (d *DASer) fetch(ctx context.Context, height uint64) error {
 	h, err := d.getter.GetByHeight(ctx, height)
 	if err != nil {
-		return err
+		return fmt.Errorf("getting: %w", err)
 	}
-
-	return d.sampleHeader(ctx, h)
+	if err = d.sampleHeader(ctx, h); err != nil {
+		return fmt.Errorf("sampling: %w", err)
+	}
+	return nil
 }
 
-func (d *DASer) storeState(ctx context.Context, s state) {
+func (d *DASer) storeCheckpount(ctx context.Context, cp checkpoint) {
 	// store latest DASed checkpoint to disk here to ensure that if DASer is not yet
 	// fully caught up to network head, it will resume DASing from this checkpoint
 	// up to current network head
-	if err := storeCheckpoint(ctx, d.cstore, s.toCheckPoint()); err != nil {
-		log.Errorw("storing checkpoint to disk", "err", err)
+	if err := storeCheckpoint(ctx, d.cstore, cp); err != nil {
+		log.Errorw("storing checkpoint to disk", "Err", err)
 	}
-	log.Infow("stored checkpoint to disk", "checkpoint", s.toCheckPoint())
+	log.Infow("stored checkpoint to disk", "checkpoint", cp)
 }
 
 func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) error {
@@ -163,11 +160,11 @@ func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) erro
 			log.Warn("Propagating proof...")
 			sendErr := d.bcast.Broadcast(ctx, fraud.CreateBadEncodingProof(h.Hash(), uint64(h.Height), byzantineErr))
 			if sendErr != nil {
-				log.Errorw("fraud proof propagating failed", "err", sendErr)
+				log.Errorw("fraud proof propagating failed", "Err", sendErr)
 			}
 		}
 		log.Errorw("sampling failed", "height", h.Height, "hash", h.Hash(),
-			"square width", len(h.DAH.RowsRoots), "data root", h.DAH.Hash(), "err", err)
+			"square width", len(h.DAH.RowsRoots), "data root", h.DAH.Hash(), "Err", err)
 		// report previous height as the last successfully sampled height
 		return err
 	}
@@ -191,31 +188,12 @@ func (d *DASer) runSubscriber(ctx context.Context, sub header.Subscription, emit
 				return
 			}
 
-			log.Errorw("failed to get next header", "err", err)
+			log.Errorw("failed to get next header", "Err", err)
 			continue
 		}
 		log.Infow("found new header", "height", h.Height)
 
 		emit(ctx, uint64(h.Height))
-	}
-}
-
-func runWorker(ctx context.Context,
-	inCh <-chan uint64,
-	outCh chan<- result,
-	fetch func(ctx2 context.Context, uint642 uint64) error) {
-
-	for height := range inCh {
-		err := fetch(ctx, height)
-
-		select {
-		case outCh <- result{
-			height: height,
-			err:    err,
-		}:
-		case <-ctx.Done():
-			return
-		}
 	}
 }
 
@@ -227,15 +205,15 @@ func (d *DASer) CatchUpRoutineState() JobInfo {
 	return JobInfo{}
 }
 
-//
-//func (d *DASer) updateSampleState(h *header.ExtendedHeader, err error) {
+// TODO: finish exporter
+//func (d *DASer) updateSampleState(h *header.ExtendedHeader, Err error) {
 //	height := uint64(h.Height)
 //
 //	d.state.sampleLk.Lock()
 //	defer d.state.sampleLk.Unlock()
 //	d.state.sample.LatestSampledHeight = height
 //	d.state.sample.LatestSampledSquareWidth = uint64(len(h.DAH.RowsRoots))
-//	d.state.sample.Error = err
+//	d.state.sample.Error = Err
 //}
 //
 //// CatchUpRoutineState reports the current state of the

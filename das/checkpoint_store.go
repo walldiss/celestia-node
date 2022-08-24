@@ -14,9 +14,10 @@ var (
 )
 
 type checkpoint struct {
-	MinSampled uint64         `json:"min_sampled_height"` // lowest sampled height
+	MinSampled uint64         `json:"min_sampled_height"` // all headers before minSampled were successfully sampled
 	MaxKnown   uint64         `json:"max_known_height"`   // height of the newest known header
-	Skipped    map[uint64]int `json:"skipped"`            // header's heights that been skipped with corresponding try count
+	Failed     map[uint64]int `json:"failed"`             // skipped header's heights with corresponding try count
+	Workers    []workerState  `json:"workers"`
 }
 
 // wrapCheckpointStore wraps the given datastore.Datastore with the `das`
