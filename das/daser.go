@@ -19,33 +19,37 @@ import (
 var log = logging.Logger("das")
 
 const (
-	samplingRange = 1
-	concurrency   = 256
+	samplingRange           = 100
+	defaultConcurrencyLimit = 256
+	storeInterval           = 10 * time.Minute
 )
 
 // DASer continuously validates availability of data committed to headers.
 type DASer struct {
 	da     share.Availability
 	bcast  fraud.Broadcaster
-	hsub   header.Subscriber   // listens for new headers in the network
-	getter header.Getter       // retrieves past headers
-	cstore datastore.Datastore // checkpoint store
+	hsub   header.Subscriber // listens for new headers in the network
+	getter header.Getter     // retrieves past headers
 
-	sampler *samplingManager
+	sampler       *samplingCoordinator
+	intervalStore backgroundStore
+	subscriber    subscriber
 
 	cancel         context.CancelFunc
 	subscriberDone chan struct{}
-	closed         int32
+	running        int32
 }
 
 type listenFn func(ctx context.Context, height uint64)
+type fetchFn func(context.Context, uint64) error
+type storeFn func(context.Context, checkpoint)
 
 // NewDASer creates a new DASer.
 func NewDASer(
 	da share.Availability,
 	hsub header.Subscriber,
 	getter header.Getter,
-	cstore datastore.Datastore,
+	dstore datastore.Datastore,
 	bcast fraud.Broadcaster,
 ) *DASer {
 	d := &DASer{
@@ -53,17 +57,20 @@ func NewDASer(
 		bcast:          bcast,
 		hsub:           hsub,
 		getter:         getter,
-		cstore:         wrapCheckpointStore(cstore),
 		subscriberDone: make(chan struct{}),
 	}
-	d.sampler = newSamplingManager(concurrency, d.fetch, d.storeCheckpount)
+
+	cstore := wrapCheckpointStore(dstore)
+	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, d.fetch, cstore)
+	d.intervalStore = newBackgroundStore(cstore, d.sampler.getCheckpoint)
+	d.subscriber = newSubscriber()
 
 	return d
 }
 
 // Start initiates subscription for new ExtendedHeaders and spawns a sampling routine.
 func (d *DASer) Start(ctx context.Context) error {
-	if d.cancel != nil {
+	if !atomic.CompareAndSwapInt32(&d.running, 0, 1) {
 		return fmt.Errorf("da: DASer already started")
 	}
 
@@ -73,7 +80,7 @@ func (d *DASer) Start(ctx context.Context) error {
 	}
 
 	// load latest DASed checkpoint
-	cp, err := loadCheckpoint(ctx, d.cstore)
+	cp, err := d.sampler.store.load(ctx)
 	if err != nil {
 		h, err := d.getter.Head(ctx)
 		if err == nil {
@@ -92,34 +99,29 @@ func (d *DASer) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 
-	go d.sampler.runCoordinator(runCtx)
-	// subscribe to new headers
-	go d.runSubscriber(runCtx, sub, d.sampler.listen)
+	go d.sampler.run(runCtx)
+	go d.subscriber.run(runCtx, sub, d.sampler.listen)
+	go d.intervalStore.run(runCtx, storeInterval)
 
 	return nil
 }
 
 // Stop stops sampling.
 func (d *DASer) Stop(ctx context.Context) error {
-	if atomic.CompareAndSwapInt32(&d.closed, 0, 1) {
-		d.cancel()
-
-		// shutdown the sampler
-		if err := d.sampler.finished(ctx); err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				return fmt.Errorf("DASer force quit: %w", err)
-			}
-			return err
-		}
-
-		// wait for subscriber to quit
-		select {
-		case <-d.subscriberDone:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	if !atomic.CompareAndSwapInt32(&d.running, 1, 0) {
+		return fmt.Errorf("da: DASer already stopped")
 	}
-	return nil
+
+	d.cancel()
+	if err := d.sampler.finished(ctx); err != nil {
+		return fmt.Errorf("DASer force quit: %w", err)
+	}
+
+	if err := d.intervalStore.wait(ctx); err != nil {
+		return fmt.Errorf("DASer force quit: %w", err)
+	}
+
+	return d.subscriber.wait(ctx)
 }
 
 func (d *DASer) fetch(ctx context.Context, height uint64) error {
@@ -131,16 +133,6 @@ func (d *DASer) fetch(ctx context.Context, height uint64) error {
 		return fmt.Errorf("sampling: %w", err)
 	}
 	return nil
-}
-
-func (d *DASer) storeCheckpount(ctx context.Context, cp checkpoint) {
-	// store latest DASed checkpoint to disk here to ensure that if DASer is not yet
-	// fully caught up to network head, it will resume DASing from this checkpoint
-	// up to current network head
-	if err := storeCheckpoint(ctx, d.cstore, cp); err != nil {
-		log.Errorw("storing checkpoint to disk", "Err", err)
-	}
-	log.Infow("stored checkpoint to disk", "checkpoint", cp)
 }
 
 func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) error {
@@ -176,60 +168,30 @@ func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) erro
 	return nil
 }
 
-func (d *DASer) runSubscriber(ctx context.Context, sub header.Subscription, emit listenFn) {
-	defer sub.Cancel()
+func (d *DASer) SamplingStats(ctx context.Context) (SamplingStats, error) {
+	return d.sampler.getStats(ctx)
+}
 
-	for {
-		// subscribe for new headers to keep sampling process up-to-date with current network state
-		h, err := sub.NextHeader(ctx)
-		if err != nil {
-			if err == context.Canceled {
-				close(d.subscriberDone)
-				return
-			}
+type done struct {
+	name     string
+	finished chan struct{}
+}
 
-			log.Errorw("failed to get next header", "Err", err)
-			continue
-		}
-		log.Infow("found new header", "height", h.Height)
-
-		emit(ctx, uint64(h.Height))
+func newDone(name string) done {
+	return done{
+		name:     name,
+		finished: make(chan struct{}),
 	}
 }
 
-func (d *DASer) SampleRoutineState() RoutineState {
-	return RoutineState{}
+func (sm *done) Done() {
+	close(sm.finished)
 }
-
-func (d *DASer) CatchUpRoutineState() JobInfo {
-	return JobInfo{}
+func (sm *done) wait(ctx context.Context) error {
+	select {
+	case <-sm.finished:
+	case <-ctx.Done():
+		return fmt.Errorf("%v stuck: %w", sm.name, ctx.Err())
+	}
+	return nil
 }
-
-// TODO: finish exporter
-//func (d *DASer) updateSampleState(h *header.ExtendedHeader, Err error) {
-//	height := uint64(h.Height)
-//
-//	d.state.sampleLk.Lock()
-//	defer d.state.sampleLk.Unlock()
-//	d.state.sample.LatestSampledHeight = height
-//	d.state.sample.LatestSampledSquareWidth = uint64(len(h.DAH.RowsRoots))
-//	d.state.sample.Error = Err
-//}
-//
-//// CatchUpRoutineState reports the current state of the
-//// DASer's `catchUp` routine.
-//func (d *DASer) CatchUpRoutineState() JobInfo {
-//	d.state.catchUpLk.RLock()
-//	state := d.state.catchUp
-//	d.state.catchUpLk.RUnlock()
-//	return state
-//}
-//
-//func (d *DASer) recordJobDetails(job *catchUpJob) {
-//	d.state.catchUpLk.Lock()
-//	defer d.state.catchUpLk.Unlock()
-//	d.state.catchUp.ID++
-//	d.state.catchUp.From = uint64(job.from)
-//	d.state.catchUp.To = uint64(job.to)
-//	d.state.catchUp.Start = time.Now()
-//}

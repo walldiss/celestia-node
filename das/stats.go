@@ -1,56 +1,28 @@
 package das
 
-import (
-	"time"
-)
-
-// TODO(@walldiss): discuss new stats
-
-// state collects information about the DASer process. Currently, there are
+// SamplingStats collects information about the DASer process. Currently, there are
 // only two sampling routines: the main sampling routine which performs sampling
 // over current network headers, and the `catchUp` routine which performs sampling
 // over past headers from the last sampled checkpoint.
-type stats struct {
-	State checkpoint `json:"state"`
-	// tracks whether routine is running
-	IsRunning bool `json:"is_running"`
-}
-
-// RoutineState contains important information about the state of a
-// current sampling routine.
-type RoutineState struct {
-	// reports if an error has occurred during the routine's
-	// sampling process
-	Error error `json:"error"`
-	// tracks the latest successfully sampled height of the routine
-	LatestSampledHeight uint64 `json:"latest_sampled_height"`
-	// tracks the square width of the latest successfully sampled
-	// height of the routine
-	LatestSampledWidth uint64 `json:"latest_sampled_width"`
-	// tracks amount of busy parallel workers
-	Concurrency uint64 `json:"concurrency"`
-	// tracks whether all known headers are sampled
+type SamplingStats struct {
+	// all headers before MinSampled were successfully sampled
+	MinSampled uint64 `json:"min_sampled_height"`
+	// MaxKnown is the height of the newest known header
+	MaxKnown uint64 `json:"max_known_height"`
+	// Failed contains all skipped header's heights with corresponding try count
+	Failed map[uint64]int `json:"failed,omitempty"`
+	// Workers has information about each currently running worker stats
+	Workers []WorkerStats `json:"workers,omitempty"`
+	// Concurrency currently running parallel workers
+	Concurrency int `json:"concurrency"`
+	// CatchUpDone indicates whether all known headers are sampled
 	CatchUpDone bool `json:"catch_up_done"`
-	// tracks whether routine is running
-	IsRunning bool `json:"is_running"`
 }
 
-// JobInfo contains information about a catchUp job.
-type JobInfo struct {
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
-	Error error     `json:"error"`
+type WorkerStats struct {
+	Curr uint64 `json:"curr"`
+	From uint64 `json:"from"`
+	To   uint64 `json:"to"`
 
-	ID     uint64 `json:"id"`
-	Height uint64 `json:"height"`
-	From   uint64 `json:"from"`
-	To     uint64 `json:"to"`
-}
-
-func (ji JobInfo) Finished() bool {
-	return ji.To == ji.Height
-}
-
-func (ji JobInfo) Duration() time.Duration {
-	return ji.End.Sub(ji.Start)
+	ErrMsg string `json:"error,omitempty"`
 }

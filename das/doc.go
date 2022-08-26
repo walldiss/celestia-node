@@ -13,7 +13,7 @@ sufficiently likely that all block data is available as it is assumed that there
 are enough `light` availability instances active on the network doing sampling over
 the same block to collectively verify its availability.
 
-The central component of this package is the `samplingManager`. It launches workers that
+The central component of this package is the `samplingCoordinator`. It launches workers that
 perform DAS on new ExtendedHeaders in the network. The DASer kicks off this loop by loading
 its last DASed header (`checkpoint`) and kicking off worker pool
 to DAS all headers between the checkpoint and the current network head. It simultaneously

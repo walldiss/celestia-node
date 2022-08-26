@@ -43,7 +43,7 @@ func TestDASerLifecycle(t *testing.T) {
 		require.NoError(t, err)
 
 		// load checkpoint and ensure it's at network head
-		checkpoint, err := loadCheckpoint(ctx, daser.cstore)
+		checkpoint, err := daser.sampler.store.load(ctx)
 		require.NoError(t, err)
 		// ensure checkpoint is stored at 30
 		assert.EqualValues(t, 30, checkpoint.MinSampled)
@@ -111,7 +111,7 @@ func TestDASer_Restart(t *testing.T) {
 	require.NoError(t, err)
 
 	// load checkpoint and ensure it's at network head
-	checkpoint, err := loadCheckpoint(ctx, daser.cstore)
+	checkpoint, err := daser.sampler.store.load(ctx)
 	require.NoError(t, err)
 	// ensure checkpoint is stored at 45
 	assert.EqualValues(t, 60, checkpoint.MinSampled)
@@ -155,7 +155,8 @@ func TestDASer_stopsAfter_BEFP(t *testing.T) {
 	case res := <-resultCh:
 		require.NoError(t, res)
 	}
-	require.True(t, daser.closed == 1)
+	// wait for manager to finish catchup
+	require.True(t, daser.running == 0)
 }
 
 // createDASerSubcomponents takes numGetter (number of headers

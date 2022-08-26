@@ -20,28 +20,21 @@ func TestCheckpointStore(t *testing.T) {
 		MinSampled: 1,
 		MaxKnown:   6,
 		Failed:     failed,
-		Workers: []workerState{
+		Workers: []workerCheckpoint{
 			{
-				From:   1,
-				To:     2,
-				Curr:   1,
-				Failed: []uint64{1},
-				Err:    nil,
+				From: 1,
+				To:   2,
 			},
 			{
-				From:   5,
-				To:     10,
-				Curr:   7,
-				Failed: []uint64{6},
-				Err:    nil,
+				From: 5,
+				To:   10,
 			},
 		},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer t.Cleanup(cancel)
-	err := storeCheckpoint(ctx, ds, checkpoint)
-	require.NoError(t, err)
-	got, err := loadCheckpoint(ctx, ds)
+	ds.store(ctx, checkpoint)
+	got, err := ds.load(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, checkpoint, got)
 }

@@ -2,27 +2,26 @@ package das
 
 import (
 	"context"
-	"sync/atomic"
 )
 
 // represents current state of sampling
-type state struct {
+type coordinatorState struct {
 	rangeSize uint64
 
 	priority   []job                      // list of headers heights that will be sampled with higher priority
-	inProgress map[int]func() workerState // keeps track of inProgress items
+	inProgress map[int]func() workerState // keeps track of running workers
 	failed     map[uint64]int             // stores heights of failed headers with amount of attempt as value
 
 	nextJobID int
 	next      uint64 // all headers before next were sent to workers
 	maxKnown  uint64 // max known header height
 
-	catchUpDone   int32         // indicates if all headers are sampled
+	catchUpDone   bool          // indicates if all headers are sampled
 	catchUpDoneCh chan struct{} // blocks until all headers are sampled
 }
 
-func initSamplingState(samplingRangeSize uint64, c checkpoint) state {
-	st := state{
+func initSamplingState(samplingRangeSize uint64, c checkpoint) coordinatorState {
+	st := coordinatorState{
 		rangeSize:     samplingRangeSize,
 		inProgress:    make(map[int]func() workerState),
 		failed:        c.Failed,
@@ -35,9 +34,9 @@ func initSamplingState(samplingRangeSize uint64, c checkpoint) state {
 		st.failed = make(map[uint64]int)
 	}
 
-	st.priority = make([]job, 0, len(st.failed)+len(c.Workers))
-	// put failed into priority
-	for h := range st.failed {
+	st.priority = make([]job, 0, len(c.Failed)+len(c.Workers))
+	// put failed into priority to retry them on restart
+	for h := range c.Failed {
 		st.priority = append(st.priority, st.newJob(h, h, true))
 	}
 
@@ -49,11 +48,10 @@ func initSamplingState(samplingRangeSize uint64, c checkpoint) state {
 	if c.MinSampled == 0 {
 		c.MinSampled = 1
 	}
-
 	return st
 }
 
-func (s *state) handleResult(res result) {
+func (s *coordinatorState) handleResult(res result) {
 	delete(s.inProgress, res.id)
 
 	failedFromWorker := make(map[uint64]bool)
@@ -61,51 +59,49 @@ func (s *state) handleResult(res result) {
 		failedFromWorker[h] = true
 	}
 
-	// update failed state
+	// update coordinator failed counter
 	for h := res.from; h <= res.to; h++ {
 		if failedFromWorker[h] {
-			// increase failed counter
+			// failed in worker, increase failed counter
 			s.failed[h]++
 			continue
 		}
-		// success, remove from failed map
 		delete(s.failed, h)
 	}
-
 	s.checkDone()
 }
 
-func (s *state) updateMaxKnown(last uint64) bool {
+func (s *coordinatorState) updateMaxKnown(last uint64) {
 	// seen this header before
 	if last <= s.maxKnown {
-		return false
+		return
 	}
 
 	if s.maxKnown == 1 {
 		log.Infow("found first header, starting sampling")
 	}
 
-	// add most recent headers into priority queue splitting jobs by rangeSize
-
+	// add most recent headers into priority queue
 	for from := s.maxKnown + 1; from <= last; from += s.rangeSize {
 		s.priority = append(s.priority, s.newJob(from, last, true))
 	}
 
 	log.Debug("added recent headers to DASer priority queue ", "from_height", s.maxKnown, "to_height", last)
 	s.maxKnown = last
-	return true
+	s.checkDone()
+	return
 }
 
 // nextJob will return header height to be processed and done flog if there is none
-func (s *state) nextJob() (next job, done bool) {
+func (s *coordinatorState) nextJob() (next job, found bool) {
 	// all headers were sent to workers.
 	if s.next > s.maxKnown {
-		return job{}, true
+		return job{}, false
 	}
 
 	// try to take from priority first
 	if next, found := s.nextFromPriority(); found {
-		return next, false
+		return next, found
 	}
 
 	j := s.newJob(s.next, s.maxKnown, false)
@@ -115,10 +111,10 @@ func (s *state) nextJob() (next job, done bool) {
 		s.next = s.maxKnown + 1
 	}
 
-	return j, false
+	return j, true
 }
 
-func (s *state) nextFromPriority() (job, bool) {
+func (s *coordinatorState) nextFromPriority() (job, bool) {
 	for len(s.priority) > 0 {
 		next := s.priority[len(s.priority)-1]
 
@@ -128,7 +124,7 @@ func (s *state) nextFromPriority() (job, bool) {
 			continue
 		}
 
-		// cut job is partly processed
+		// cut job iа partly processed
 		if next.from <= s.next {
 			next.from = s.next
 		}
@@ -139,25 +135,48 @@ func (s *state) nextFromPriority() (job, bool) {
 	return job{}, false
 }
 
-func (s *state) putInProgress(jobID int, w *worker) {
-	s.inProgress[jobID] = w.getState
+func (s *coordinatorState) putInProgress(jobID int, getState func() workerState) {
+	s.inProgress[jobID] = getState
 }
 
-func (s *state) toCheckPoint() checkpoint {
-	workers := make([]workerState, 0, len(s.inProgress))
-	minSampled := s.next - 1
+func (s *coordinatorState) newJob(from, max uint64, fromPriority bool) job {
+	s.nextJobID++
+	to := from + s.rangeSize - 1
+	if to > max {
+		to = max
+	}
+	return job{
+		id:         s.nextJobID,
+		from:       from,
+		to:         to,
+		isPriority: fromPriority,
+	}
+}
 
-	// gather worker stats
+func (s *coordinatorState) stats() SamplingStats {
+	workers := make([]WorkerStats, 0, len(s.inProgress))
+	minSampled := s.next - 1
+	failed := make(map[uint64]int)
+
+	// gather worker SamplingStats
 	for _, getStats := range s.inProgress {
 		wstats := getStats()
-		workers = append(workers, wstats)
+		var errMsg string
+		if wstats.Err != nil {
+			errMsg = wstats.Err.Error()
+		}
+		workers = append(workers, WorkerStats{
+			Curr:   wstats.Curr,
+			From:   wstats.From,
+			To:     wstats.To,
+			ErrMsg: errMsg,
+		})
 
-		if len(wstats.Failed) > 0 {
-			// set minSampled to minimum failed - 1
-			if min := wstats.Failed[0] - 1; min < minSampled {
-				minSampled = min
+		for _, h := range wstats.failed {
+			failed[h]++
+			if h < minSampled {
+				minSampled = h - 1
 			}
-			continue
 		}
 
 		if wstats.Curr < minSampled {
@@ -165,36 +184,41 @@ func (s *state) toCheckPoint() checkpoint {
 		}
 	}
 
-	// check previous jobs results. set minSampled to minimum failed - 1
-	for failed := range s.failed {
-		if min := failed - 1; min < minSampled {
-			minSampled = min
+	// set minSampled to minimum failed - 1
+	for h, count := range s.failed {
+		failed[h] += count
+		if h < minSampled {
+			minSampled = h - 1
 		}
 	}
 
-	return checkpoint{
-		MinSampled: minSampled,
-		MaxKnown:   s.maxKnown,
-		Failed:     s.failed,
-		Workers:    workers,
+	return SamplingStats{
+		MinSampled:  minSampled,
+		MaxKnown:    s.maxKnown,
+		Failed:      failed,
+		Workers:     workers,
+		Concurrency: len(workers),
+		CatchUpDone: s.catchUpDone,
 	}
 }
 
-func (s *state) checkDone() {
+func (s *coordinatorState) checkDone() {
 	if len(s.inProgress) == 0 && s.next > s.maxKnown {
-		if atomic.CompareAndSwapInt32(&s.catchUpDone, 0, 1) {
+		if !s.catchUpDone {
 			close(s.catchUpDoneCh)
+			s.catchUpDone = true
 		}
 		return
 	}
 
-	if atomic.CompareAndSwapInt32(&s.catchUpDone, 1, 0) {
+	if s.catchUpDone {
 		s.catchUpDoneCh = make(chan struct{})
+		s.catchUpDone = false
 	}
 }
 
 // waitCatchUp waits for sampling process to finish catchup
-func (s *state) waitCatchUp(ctx context.Context) error {
+func (s *coordinatorState) waitCatchUp(ctx context.Context) error {
 	select {
 	case <-s.catchUpDoneCh:
 	case <-ctx.Done():
