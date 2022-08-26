@@ -25,7 +25,7 @@ func initSamplingState(samplingRangeSize uint64, c checkpoint) coordinatorState 
 		rangeSize:     samplingRangeSize,
 		inProgress:    make(map[int]func() workerState),
 		failed:        c.Failed,
-		next:          c.SampledBefore + 1,
+		next:          c.SampledBefore,
 		maxKnown:      c.MaxKnown,
 		catchUpDoneCh: make(chan struct{}),
 	}
@@ -91,7 +91,6 @@ func (s *coordinatorState) updateMaxKnown(last uint64) {
 	log.Debug("added recent headers to DASer priority queue ", "from_height", s.maxKnown, "to_height", last)
 	s.maxKnown = last
 	s.checkDone()
-	return
 }
 
 // nextJob will return header height to be processed and done flog if there is none
@@ -129,6 +128,7 @@ func (s *coordinatorState) nextFromPriority() (job, bool) {
 		// cut job iа partly processed
 		if next.from <= s.next {
 			next.from = s.next
+			s.next = next.to + 1 // move next to last
 		}
 
 		s.priority = s.priority[:len(s.priority)-1]
@@ -157,7 +157,7 @@ func (s *coordinatorState) newJob(from, max uint64, fromPriority bool) job {
 
 func (s *coordinatorState) stats() SamplingStats {
 	workers := make([]WorkerStats, 0, len(s.inProgress))
-	sampledBefore := s.next - 1
+	sampledBefore := s.next
 	failed := make(map[uint64]int)
 
 	// gather worker SamplingStats
@@ -177,12 +177,12 @@ func (s *coordinatorState) stats() SamplingStats {
 		for _, h := range wstats.failed {
 			failed[h]++
 			if h < sampledBefore {
-				sampledBefore = h - 1
+				sampledBefore = h
 			}
 		}
 
 		if wstats.Curr < sampledBefore {
-			sampledBefore = wstats.Curr - 1
+			sampledBefore = wstats.Curr
 		}
 	}
 
@@ -190,7 +190,7 @@ func (s *coordinatorState) stats() SamplingStats {
 	for h, count := range s.failed {
 		failed[h] += count
 		if h < sampledBefore {
-			sampledBefore = h - 1
+			sampledBefore = h
 		}
 	}
 

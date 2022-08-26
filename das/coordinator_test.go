@@ -15,13 +15,13 @@ func TestManager(t *testing.T) {
 	concurrency := 10
 	samplingRange := uint64(10)
 	maxKnown := uint64(500)
-	sampleFrom := uint64(1)
+	sampleBefore := uint64(1)
 	timeoutDelay := 5 * time.Second
 
 	t.Run("test run", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		fetcher := newMockFetcher(sampleFrom, maxKnown)
+		fetcher := newMockFetcher(sampleBefore, maxKnown)
 		store := newExpectStore(t, fetcher.finalState)
 
 		manager := newSamplingCoordinator(concurrency, fetcher.fetch, store)
@@ -35,7 +35,7 @@ func TestManager(t *testing.T) {
 		// check if all jobs were fetched successfully
 		select {
 		case <-ctx.Done():
-			assert.NoError(t, ctx.Err(), len(fetcher.done))
+			assert.NoError(t, ctx.Err())
 		case <-fetcher.finishedCh:
 		}
 
@@ -46,19 +46,20 @@ func TestManager(t *testing.T) {
 	})
 
 	t.Run("discovered new headers", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay*100)
+		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		fetcher := newMockFetcher(sampleFrom, maxKnown)
+		fetcher := newMockFetcher(sampleBefore, maxKnown)
 		store := newExpectStore(t, fetcher.finalState)
 
-		manager := newSamplingCoordinator(1, fetcher.fetch, store)
+		manager := newSamplingCoordinator(concurrency, fetcher.fetch, store)
 		manager.state = initSamplingState(samplingRange, fetcher.checkpoint)
 		go manager.run(ctx)
 
+		time.Sleep(time.Second)
 		// discover new height
 		for i := 0; i < 200; i++ {
 			// mess the order by running in go-routine
-			go fetcher.discover(ctx, maxKnown+uint64(i), manager.listen)
+			fetcher.discover(ctx, maxKnown+uint64(i), manager.listen)
 		}
 
 		// wait for manager to finish catchup
@@ -139,10 +140,10 @@ func TestManager(t *testing.T) {
 	t.Run("priority routine should not lock other workers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		fetcher := newMockFetcher(sampleFrom, maxKnown)
+		fetcher := newMockFetcher(sampleBefore, maxKnown)
 		store := newExpectStore(t, fetcher.finalState)
 
-		lk := newLock(sampleFrom, maxKnown) // lock all workers before start
+		lk := newLock(sampleBefore, maxKnown) // lock all workers before start
 		manager := newSamplingCoordinator(concurrency,
 			lk.middleWare(fetcher.fetch), store)
 		manager.state = initSamplingState(samplingRange, fetcher.checkpoint)
@@ -164,7 +165,7 @@ func TestManager(t *testing.T) {
 		time.Sleep(time.Second)
 
 		// check that only last header is pending
-		assert.EqualValues(t, int(discovered-sampleFrom), fetcher.doneAmount())
+		assert.EqualValues(t, int(discovered-sampleBefore), fetcher.doneAmount())
 		assert.False(t, fetcher.heightIsDone(discovered))
 
 		lk.releaseAll()
@@ -195,7 +196,7 @@ func TestManager(t *testing.T) {
 
 		//
 		expectedState := fetcher.finalState()
-		expectedState.SampledBefore = bornToFail[0] - 1
+		expectedState.SampledBefore = bornToFail[0]
 		for _, h := range bornToFail {
 			expectedState.Failed[h] = 1
 		}
@@ -233,7 +234,7 @@ func TestManager(t *testing.T) {
 		fetcher.checkpoint.Failed = failedLastRun
 
 		expectedState := fetcher.checkpoint
-		expectedState.SampledBefore = failedAgain[0] - 1
+		expectedState.SampledBefore = failedAgain[0]
 		expectedState.Failed = map[uint64]int{16: 3}
 
 		store := newExpectStore(t, func() checkpoint { return expectedState })
@@ -295,14 +296,14 @@ type mockFetcher struct {
 	finishedCh chan struct{}
 }
 
-func newMockFetcher(sampleFrom, sampleTo uint64, bornToFail ...uint64) mockFetcher {
+func newMockFetcher(SampledBefore, sampleTo uint64, bornToFail ...uint64) mockFetcher {
 	failMap := make(map[uint64]bool)
 	for _, h := range bornToFail {
 		failMap[h] = true
 	}
 	return mockFetcher{
 		checkpoint: checkpoint{
-			SampledBefore: sampleFrom,
+			SampledBefore: SampledBefore,
 			MaxKnown:      sampleTo,
 			Failed:        make(map[uint64]int),
 			Workers:       make([]workerCheckpoint, 0),
@@ -350,7 +351,7 @@ func (m *mockFetcher) finalState() checkpoint {
 	defer m.lock.Unlock()
 
 	finalState := m.checkpoint
-	finalState.SampledBefore = finalState.MaxKnown
+	finalState.SampledBefore = finalState.MaxKnown + 1
 	return finalState
 }
 
@@ -360,7 +361,10 @@ func (m *mockFetcher) discover(ctx context.Context, newHeight uint64, emit func(
 
 	if newHeight > m.checkpoint.MaxKnown {
 		m.checkpoint.MaxKnown = newHeight
-		m.finishedCh = make(chan struct{})
+		if m.finished {
+			m.finishedCh = make(chan struct{})
+			m.finished = false
+		}
 	}
 	emit(ctx, newHeight)
 }

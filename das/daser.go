@@ -43,7 +43,6 @@ type DASer struct {
 
 type listenFn func(ctx context.Context, height uint64)
 type fetchFn func(context.Context, uint64) error
-type storeFn func(context.Context, checkpoint)
 
 // NewDASer creates a new DASer.
 func NewDASer(

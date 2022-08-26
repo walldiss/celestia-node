@@ -2,7 +2,6 @@ package das
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -36,7 +35,6 @@ func TestCheckpointStore(t *testing.T) {
 	defer t.Cleanup(cancel)
 	ds.store(ctx, checkpoint)
 	got, err := ds.load(ctx)
-	fmt.Println(got)
 	require.NoError(t, err)
 	assert.Equal(t, checkpoint, got)
 }
