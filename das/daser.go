@@ -129,6 +129,7 @@ func (d *DASer) sample(ctx context.Context, sampleHeight uint64) error {
 	if err != nil {
 		return fmt.Errorf("getting: %w", err)
 	}
+
 	if err = d.sampleHeader(ctx, h); err != nil {
 		return fmt.Errorf("sampling: %w", err)
 	}

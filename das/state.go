@@ -46,8 +46,7 @@ func initSamplingState(samplingRangeSize uint64, c checkpoint) coordinatorState 
 	}
 
 	if c.SampledBefore == 0 {
-		c.SampledBefore = 1
-		c.MaxKnown = 1
+		st.next, st.maxKnown = 1, 1
 	}
 	return st
 }
