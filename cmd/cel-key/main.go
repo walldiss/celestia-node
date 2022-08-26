@@ -14,10 +14,9 @@ import (
 
 	"github.com/celestiaorg/celestia-app/app"
 	"github.com/celestiaorg/celestia-app/app/encoding"
-	"github.com/celestiaorg/celestia-node/cmd"
 )
 
-var encodingConfig = encoding.MakeEncodingConfig(app.ModuleEncodingRegisters...)
+var encodingConfig = encoding.MakeConfig(app.ModuleEncodingRegisters...)
 
 var initClientCtx = client.Context{}.
 	WithCodec(encodingConfig.Codec).
@@ -62,8 +61,9 @@ func main() {
 func run() error {
 	cfg := sdk.GetConfig()
 	cfg.SetBech32PrefixForAccount(app.Bech32PrefixAccAddr, app.Bech32PrefixAccPub)
+	cfg.SetBech32PrefixForValidator(app.Bech32PrefixValAddr, app.Bech32PrefixValPub)
 	cfg.Seal()
 
 	ctx := context.WithValue(context.Background(), client.ClientContextKey, &initClientCtx)
-	return rootCmd.ExecuteContext(cmd.WithEnv(ctx))
+	return rootCmd.ExecuteContext(ctx)
 }

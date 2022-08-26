@@ -1,6 +1,8 @@
 package state
 
 import (
+	"cosmossdk.io/math"
+
 	"context"
 
 	"github.com/cosmos/cosmos-sdk/types"
@@ -29,11 +31,20 @@ type Accessor interface {
 	BalanceForAddress(ctx context.Context, addr Address) (*Balance, error)
 
 	// Transfer sends the given amount of coins from default wallet of the node to the given account address.
-	Transfer(ctx context.Context, to types.Address, amount types.Int, gasLimit uint64) (*TxResponse, error)
+	Transfer(ctx context.Context, to types.Address, amount math.Int, gasLimit uint64) (*TxResponse, error)
 	// SubmitTx submits the given transaction/message to the
 	// Celestia network and blocks until the tx is included in
 	// a block.
 	SubmitTx(ctx context.Context, tx Tx) (*TxResponse, error)
 	// SubmitPayForData builds, signs and submits a PayForData transaction.
 	SubmitPayForData(ctx context.Context, nID namespace.ID, data []byte, gasLim uint64) (*TxResponse, error)
+
+	// CancelUnbondingDelegation cancels a user's pending undelegation from a validator.
+	CancelUnbondingDelegation(ctx context.Context, valAddr Address, amount, height Int, gasLim uint64) (*TxResponse, error)
+	// BeginRedelegate sends a user's delegated tokens to a new validator for redelegation.
+	BeginRedelegate(ctx context.Context, srcValAddr, dstValAddr Address, amount Int, gasLim uint64) (*TxResponse, error)
+	// Undelegate undelegates a user's delegated tokens, unbonding them from the current validator.
+	Undelegate(ctx context.Context, delAddr Address, amount Int, gasLim uint64) (*TxResponse, error)
+	// Delegate sends a user's liquid tokens to a validator for delegation.
+	Delegate(ctx context.Context, delAddr Address, amount Int, gasLim uint64) (*TxResponse, error)
 }

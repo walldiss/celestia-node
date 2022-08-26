@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/celestiaorg/celestia-app/app"
-	"github.com/celestiaorg/celestia-node/cmd"
 )
 
 func init() {
@@ -18,6 +17,7 @@ func init() {
 	// as in the celestia application.
 	cfg := sdk.GetConfig()
 	cfg.SetBech32PrefixForAccount(app.Bech32PrefixAccAddr, app.Bech32PrefixAccPub)
+	cfg.SetBech32PrefixForValidator(app.Bech32PrefixValAddr, app.Bech32PrefixValPub)
 	cfg.Seal()
 
 	rootCmd.AddCommand(
@@ -39,7 +39,7 @@ func main() {
 func run() error {
 	rand.Seed(time.Now().Unix())
 
-	return rootCmd.ExecuteContext(cmd.WithEnv(context.Background()))
+	return rootCmd.ExecuteContext(context.Background())
 }
 
 var rootCmd = &cobra.Command{

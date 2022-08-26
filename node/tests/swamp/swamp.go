@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/libp2p/go-libp2p-core/host"
+	"github.com/libp2p/go-libp2p-core/peer"
 	mocknet "github.com/libp2p/go-libp2p/p2p/net/mock"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,7 @@ var blackholeIP6 = net.ParseIP("100::")
 
 const subscriberID string = "NewBlockSwamp/Events"
 
-var queryEvent string = types.QueryForEvent(types.EventNewBlockValue).String()
+var queryEvent string = types.QueryForEvent(types.EventNewBlock).String()
 
 // Swamp represents the main functionality that is needed for the test-case:
 // - Network to link the nodes
@@ -69,6 +70,10 @@ func NewSwamp(t *testing.T, options ...Option) *Swamp {
 	require.NoError(t, err)
 	remote, err := core.NewRemote(ip, port)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := remote.Stop()
+		require.NoError(t, err)
+	})
 
 	err = remote.Start()
 	require.NoError(t, err)
@@ -295,4 +300,21 @@ func (s *Swamp) remove(rn *node.Node, sn []*node.Node) ([]*node.Node, error) {
 		return sn, fmt.Errorf("cannot delete the node")
 	}
 	return sn, nil
+}
+
+// Connect allows to connect peers after hard disconnection.
+func (s *Swamp) Connect(t *testing.T, peerA, peerB peer.ID) {
+	_, err := s.Network.LinkPeers(peerA, peerB)
+	require.NoError(t, err)
+	_, err = s.Network.ConnectPeers(peerA, peerB)
+	require.NoError(t, err)
+}
+
+// Disconnect allows to break a connection between two peers without any possibility to re-establish it.
+// Order is very important here. We have to unlink peers first, and only after that call disconnect.
+// This is hard disconnect and peers will not be able to reconnect.
+// In order to reconnect peers again, please use swamp.Connect
+func (s *Swamp) Disconnect(t *testing.T, peerA, peerB peer.ID) {
+	require.NoError(t, s.Network.UnlinkPeers(peerA, peerB))
+	require.NoError(t, s.Network.DisconnectPeers(peerA, peerB))
 }
