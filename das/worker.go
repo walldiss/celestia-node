@@ -12,7 +12,7 @@ type worker struct {
 	lock     sync.Mutex
 	state    workerState
 	resultCh chan<- result
-	fetch    func(context.Context, uint64) error
+	sample   func(context.Context, uint64) error
 }
 
 // workerState contains important information about the state of a
@@ -34,10 +34,10 @@ type job struct {
 
 func newWorker(
 	resultCh chan<- result,
-	fetch func(context.Context, uint64) error) worker {
+	sample func(context.Context, uint64) error) worker {
 	return worker{
 		resultCh: resultCh,
-		fetch:    fetch,
+		sample:   sample,
 	}
 }
 
@@ -45,7 +45,7 @@ func (w *worker) run(ctx context.Context, j job) {
 	w.setStateFromJob(j)
 
 	for curr := j.from; curr <= j.to; curr++ {
-		err := w.fetch(ctx, curr)
+		err := w.sample(ctx, curr)
 		w.setResult(curr, err)
 
 		select {

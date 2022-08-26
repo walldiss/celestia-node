@@ -42,7 +42,7 @@ type DASer struct {
 }
 
 type listenFn func(ctx context.Context, height uint64)
-type fetchFn func(context.Context, uint64) error
+type sampleFn func(context.Context, uint64) error
 
 // NewDASer creates a new DASer.
 func NewDASer(
@@ -61,7 +61,7 @@ func NewDASer(
 	}
 
 	cstore := wrapCheckpointStore(dstore)
-	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, d.fetch, cstore)
+	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, d.sample, cstore)
 	d.intervalStore = newBackgroundStore(cstore, d.sampler.getCheckpoint)
 	d.subscriber = newSubscriber()
 
@@ -124,7 +124,7 @@ func (d *DASer) Stop(ctx context.Context) error {
 	return d.subscriber.wait(ctx)
 }
 
-func (d *DASer) fetch(ctx context.Context, sampleHeight uint64) error {
+func (d *DASer) sample(ctx context.Context, sampleHeight uint64) error {
 	h, err := d.getter.GetByHeight(ctx, sampleHeight)
 	if err != nil {
 		return fmt.Errorf("getting: %w", err)
@@ -136,10 +136,6 @@ func (d *DASer) fetch(ctx context.Context, sampleHeight uint64) error {
 }
 
 func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) error {
-	if h == nil {
-		return nil
-	}
-
 	startTime := time.Now()
 
 	err := d.da.SharesAvailable(ctx, h.DAH)

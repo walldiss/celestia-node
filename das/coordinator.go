@@ -8,7 +8,7 @@ import (
 // samplingCoordinator runs and coordinates sampling workers and updates current sampling state
 type samplingCoordinator struct {
 	concurrencyLimit int
-	fetchFn          fetchFn
+	sampleFn         sampleFn
 	store            checkpointStore
 
 	state coordinatorState
@@ -30,11 +30,11 @@ type result struct {
 
 func newSamplingCoordinator(
 	concurrency int,
-	fetch fetchFn,
+	sample sampleFn,
 	store checkpointStore) *samplingCoordinator {
 	return &samplingCoordinator{
 		concurrencyLimit: concurrency,
-		fetchFn:          fetch,
+		sampleFn:         sample,
 		store:            store,
 		resultCh:         make(chan result),
 		updMaxCh:         make(chan uint64),
@@ -72,7 +72,7 @@ func (sm *samplingCoordinator) run(ctx context.Context) {
 
 // runWorker runs job in separate worker go-routine
 func (sm *samplingCoordinator) runWorker(ctx context.Context, j job) {
-	w := newWorker(sm.resultCh, sm.fetchFn)
+	w := newWorker(sm.resultCh, sm.sampleFn)
 	sm.state.putInProgress(j.id, w.getState)
 
 	// launch worker go-routine

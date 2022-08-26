@@ -216,7 +216,7 @@ func (m *mockGetter) fillSubWithHeaders(
 		randHeader.Height = int64(i + 1)
 
 		sub.Headers[index] = randHeader
-		// also store to mock getter for duplicate fetching
+		// also store to mock getter for duplicate sampleing
 		m.headers[int64(i+1)] = randHeader
 
 		index++

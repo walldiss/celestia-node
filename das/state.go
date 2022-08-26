@@ -125,7 +125,7 @@ func (s *coordinatorState) nextFromPriority() (job, bool) {
 			continue
 		}
 
-		// cut job iа partly processed
+		// cut job if it is partially processed
 		if next.from <= s.next {
 			next.from = s.next
 			s.next = next.to + 1 // move next to last
