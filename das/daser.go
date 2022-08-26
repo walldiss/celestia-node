@@ -116,11 +116,9 @@ func (d *DASer) Stop(ctx context.Context) error {
 	if err := d.sampler.finished(ctx); err != nil {
 		return fmt.Errorf("DASer force quit: %w", err)
 	}
-
 	if err := d.intervalStore.wait(ctx); err != nil {
 		return fmt.Errorf("DASer force quit: %w", err)
 	}
-
 	return d.subscriber.wait(ctx)
 }
 
@@ -167,28 +165,4 @@ func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) erro
 
 func (d *DASer) SamplingStats(ctx context.Context) (SamplingStats, error) {
 	return d.sampler.getStats(ctx)
-}
-
-type done struct {
-	name     string
-	finished chan struct{}
-}
-
-func newDone(name string) done {
-	return done{
-		name:     name,
-		finished: make(chan struct{}),
-	}
-}
-
-func (sm *done) Done() {
-	close(sm.finished)
-}
-func (sm *done) wait(ctx context.Context) error {
-	select {
-	case <-sm.finished:
-	case <-ctx.Done():
-		return fmt.Errorf("%v stuck: %w", sm.name, ctx.Err())
-	}
-	return nil
 }
