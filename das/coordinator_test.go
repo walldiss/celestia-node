@@ -30,7 +30,7 @@ func TestCoordinator(t *testing.T) {
 
 		// wait for coordinator to finish catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
-		assert.Emptyf(t, coordinator.state.failed, "failde list should be empty")
+		assert.Emptyf(t, coordinator.state.failed, "failed list should be empty")
 
 		// check if all jobs were sampled successfully
 		select {
@@ -55,7 +55,7 @@ func TestCoordinator(t *testing.T) {
 		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 		// discover new height
 		for i := 0; i < 200; i++ {
 			// mess the order by running in go-routine
@@ -64,7 +64,7 @@ func TestCoordinator(t *testing.T) {
 
 		// wait for coordinator to finish catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
-		assert.Emptyf(t, coordinator.state.failed, "failde list should be empty")
+		assert.Emptyf(t, coordinator.state.failed, "failed list should be empty")
 
 		// check if all jobs were sampled successfully
 		select {
@@ -109,7 +109,7 @@ func TestCoordinator(t *testing.T) {
 		go coordinator.run(ctx)
 
 		// wait for worker to pick up first job
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 
 		// discover new height
 		sampler.discover(ctx, toBeDiscovered, coordinator.listen)
@@ -122,7 +122,7 @@ func TestCoordinator(t *testing.T) {
 
 		// wait for coordinator to finish catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
-		assert.Emptyf(t, coordinator.state.failed, "failde list should be empty")
+		assert.Emptyf(t, coordinator.state.failed, "failed list should be empty")
 
 		// check if all jobs were sampled successfully
 		select {
@@ -149,7 +149,7 @@ func TestCoordinator(t *testing.T) {
 		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 		// discover new height and lock it
 		discovered := maxKnown + 1000
 		lk.add(discovered)
@@ -162,7 +162,7 @@ func TestCoordinator(t *testing.T) {
 		lk.releaseAll(discovered)
 
 		// wait for coordinator to finish catchup
-		time.Sleep(time.Second)
+		time.Sleep(50 * time.Millisecond)
 
 		// check that only last header is pending
 		assert.EqualValues(t, int(discovered-sampleBefore), sampler.doneAmount())
@@ -172,7 +172,7 @@ func TestCoordinator(t *testing.T) {
 
 		// wait for coordinator to finish catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
-		assert.Emptyf(t, coordinator.state.failed, "failde list is not empty")
+		assert.Emptyf(t, coordinator.state.failed, "failed list is not empty")
 
 		// check if all jobs were sampled successfully
 		select {
