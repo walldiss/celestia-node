@@ -296,14 +296,14 @@ type mockFetcher struct {
 	finishedCh chan struct{}
 }
 
-func newMockFetcher(SampledBefore, sampleTo uint64, bornToFail ...uint64) mockFetcher {
+func newMockFetcher(sampledBefore, sampleTo uint64, bornToFail ...uint64) mockFetcher {
 	failMap := make(map[uint64]bool)
 	for _, h := range bornToFail {
 		failMap[h] = true
 	}
 	return mockFetcher{
 		checkpoint: checkpoint{
-			SampledBefore: SampledBefore,
+			SampledBefore: sampledBefore,
 			MaxKnown:      sampleTo,
 			Failed:        make(map[uint64]int),
 			Workers:       make([]workerCheckpoint, 0),
@@ -339,10 +339,14 @@ func (m *mockFetcher) fetch(ctx context.Context, h uint64) error {
 }
 
 func (m *mockFetcher) heightIsDone(h uint64) bool {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	return m.done[h] != 0
 }
 
 func (m *mockFetcher) doneAmount() int {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	return len(m.done)
 }
 

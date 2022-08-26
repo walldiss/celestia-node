@@ -201,6 +201,7 @@ func (s *coordinatorState) stats() SamplingStats {
 		Workers:       workers,
 		Concurrency:   len(workers),
 		CatchUpDone:   s.catchUpDone,
+		IsRunning:     len(workers) > 0 || s.catchUpDone,
 	}
 }
 

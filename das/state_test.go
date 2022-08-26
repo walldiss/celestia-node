@@ -2,9 +2,11 @@ package das
 
 import (
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
 	"go.uber.org/multierr"
 )
 
@@ -43,7 +45,7 @@ func Test_coordinatorStats(t *testing.T) {
 				maxKnown:  100,
 			},
 			SamplingStats{
-				SampledBefore: 11,
+				SampledBefore: 12,
 				MaxKnown:      100,
 				Failed:        map[uint64]int{22: 2, 23: 1, 24: 2, 12: 1, 13: 1},
 				Workers: []WorkerStats{
@@ -62,12 +64,16 @@ func Test_coordinatorStats(t *testing.T) {
 				},
 				Concurrency: 2,
 				CatchUpDone: false,
+				IsRunning:   true,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stats := tt.state.stats()
+			sort.Slice(stats.Workers, func(i, j int) bool {
+				return stats.Workers[i].From > stats.Workers[j].Curr
+			})
 			assert.Equalf(t, tt.want, stats, "stats()")
 		})
 	}
