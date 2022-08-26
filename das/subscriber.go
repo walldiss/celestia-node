@@ -21,7 +21,6 @@ func (s *subscriber) run(ctx context.Context, sub header.Subscription, emit list
 	defer s.Done()
 
 	for {
-		//
 		h, err := sub.NextHeader(ctx)
 		if err != nil {
 			if err == context.Canceled {
