@@ -57,8 +57,7 @@ func TestManager(t *testing.T) {
 
 		// discover new height
 		for i := 0; i < 200; i++ {
-			go fetcher.discover(ctx, maxKnown+uint64(i), manager.listen)
-			go fetcher.discover(ctx, maxKnown+uint64(i), manager.listen)
+			// mess the order by running in go-routine
 			go fetcher.discover(ctx, maxKnown+uint64(i), manager.listen)
 		}
 
@@ -196,7 +195,7 @@ func TestManager(t *testing.T) {
 
 		//
 		expectedState := fetcher.finalState()
-		expectedState.MinSampled = bornToFail[0] - 1
+		expectedState.SampledBefore = bornToFail[0] - 1
 		for _, h := range bornToFail {
 			expectedState.Failed[h] = 1
 		}
@@ -234,7 +233,7 @@ func TestManager(t *testing.T) {
 		fetcher.checkpoint.Failed = failedLastRun
 
 		expectedState := fetcher.checkpoint
-		expectedState.MinSampled = failedAgain[0] - 1
+		expectedState.SampledBefore = failedAgain[0] - 1
 		expectedState.Failed = map[uint64]int{16: 3}
 
 		store := newExpectStore(t, func() checkpoint { return expectedState })
@@ -271,8 +270,8 @@ func BenchmarkManager(b *testing.B) {
 			func(ctx context.Context, u uint64) error { return nil },
 			dummyStore{})
 		manager.state = initSamplingState(samplingRange, checkpoint{
-			MinSampled: 1,
-			MaxKnown:   uint64(b.N),
+			SampledBefore: 1,
+			MaxKnown:      uint64(b.N),
 		})
 		go manager.run(ctx)
 
@@ -284,6 +283,7 @@ func BenchmarkManager(b *testing.B) {
 	})
 }
 
+// ensures all headers are sampled in range except once that are born to fail
 type mockFetcher struct {
 	lock sync.Mutex
 
@@ -302,10 +302,10 @@ func newMockFetcher(sampleFrom, sampleTo uint64, bornToFail ...uint64) mockFetch
 	}
 	return mockFetcher{
 		checkpoint: checkpoint{
-			MinSampled: sampleFrom,
-			MaxKnown:   sampleTo,
-			Failed:     make(map[uint64]int),
-			Workers:    make([]workerCheckpoint, 0),
+			SampledBefore: sampleFrom,
+			MaxKnown:      sampleTo,
+			Failed:        make(map[uint64]int),
+			Workers:       make([]workerCheckpoint, 0),
 		},
 		bornToFail: failMap,
 		done:       make(map[uint64]int),
@@ -321,12 +321,12 @@ func (m *mockFetcher) fetch(ctx context.Context, h uint64) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	if h > m.MaxKnown || h < m.MinSampled {
-		return fmt.Errorf("header: %v out of range: %v-%v", h, m.MinSampled, m.MaxKnown)
+	if h > m.MaxKnown || h < m.SampledBefore {
+		return fmt.Errorf("header: %v out of range: %v-%v", h, m.SampledBefore, m.MaxKnown)
 	}
 	m.done[h]++
 
-	if len(m.done) > int(m.MaxKnown-m.MinSampled) && !m.finished {
+	if len(m.done) > int(m.MaxKnown-m.SampledBefore) && !m.finished {
 		m.finished = true
 		close(m.finishedCh)
 	}
@@ -350,7 +350,7 @@ func (m *mockFetcher) finalState() checkpoint {
 	defer m.lock.Unlock()
 
 	finalState := m.checkpoint
-	finalState.MinSampled = finalState.MaxKnown
+	finalState.SampledBefore = finalState.MaxKnown
 	return finalState
 }
 
@@ -527,6 +527,7 @@ func (m dummyStore) load(ctx context.Context) (checkpoint, error) {
 func (m dummyStore) store(ctx context.Context, cp checkpoint) {
 }
 
+// checks the stored checkpoint is correct
 type expectStore struct {
 	*testing.T
 	dummyStore

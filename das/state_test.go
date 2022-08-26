@@ -43,9 +43,9 @@ func Test_coordinatorStats(t *testing.T) {
 				maxKnown:  100,
 			},
 			SamplingStats{
-				MinSampled: 11,
-				MaxKnown:   100,
-				Failed:     map[uint64]int{22: 2, 23: 1, 24: 2, 12: 1, 13: 1},
+				SampledBefore: 11,
+				MaxKnown:      100,
+				Failed:        map[uint64]int{22: 2, 23: 1, 24: 2, 12: 1, 13: 1},
 				Workers: []WorkerStats{
 					{
 						Curr:   25,

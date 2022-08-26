@@ -1,8 +1,10 @@
 package das
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"time"
@@ -23,15 +25,16 @@ type dataStore struct {
 }
 
 type checkpoint struct {
-	MinSampled uint64 `json:"min_sampled"`
-	MaxKnown   uint64 `json:"max_known"`
-	// failed will be put in priority upon restart
-	Failed  map[uint64]int     `json:"failed,omitempty"`
-	Workers []workerCheckpoint `json:"Workers,omitempty"`
+	SampledBefore uint64             `json:"sampled_before"`
+	MaxKnown      uint64             `json:"max_known"`
+	Failed        map[uint64]int     `json:"failed,omitempty"` // failed will be put in priority on restart
+	Workers       []workerCheckpoint `json:"workers,omitempty"`
 }
 
+// workerCheckpoint will be used to resume worker on restart
 type workerCheckpoint struct {
-	From, To uint64
+	From uint64 `json:"from"`
+	To   uint64 `json:"to"`
 }
 
 // backgroundStore periodically saves current sampling state in case of DASer force quit before
@@ -51,10 +54,10 @@ func newCheckpoint(stats SamplingStats) checkpoint {
 		})
 	}
 	return checkpoint{
-		MinSampled: stats.MinSampled,
-		MaxKnown:   stats.MaxKnown,
-		Failed:     stats.Failed,
-		Workers:    workers,
+		SampledBefore: stats.SampledBefore,
+		MaxKnown:      stats.MaxKnown,
+		Failed:        stats.Failed,
+		Workers:       workers,
 	}
 }
 
@@ -99,7 +102,7 @@ func (s *dataStore) store(ctx context.Context, cp checkpoint) {
 	if err = s.Put(ctx, checkpointKey, bs); err != nil {
 		log.Errorw("storing checkpoint to disk", "Err", err)
 	}
-	log.Infow("stored checkpoint to disk", "checkpoint", cp)
+	log.Info("stored checkpoint to disk\n", cp.String())
 }
 
 func newBackgroundStore(store checkpointStore,
@@ -120,7 +123,7 @@ func (bgs *backgroundStore) run(ctx context.Context, storeInterval time.Duration
 	}
 	storeTicker := time.NewTicker(storeInterval)
 
-	var prevMinSampled uint64
+	var prevSampledBefore uint64
 	for {
 		// blocked by ticker to perform store only once in period of time
 		select {
@@ -133,9 +136,28 @@ func (bgs *backgroundStore) run(ctx context.Context, storeInterval time.Duration
 		if err != nil {
 			continue
 		}
-		if cp.MinSampled != prevMinSampled {
+		if cp.SampledBefore != prevSampledBefore {
 			bgs.store.store(ctx, cp)
-			prevMinSampled = cp.MinSampled
+			prevSampledBefore = cp.SampledBefore
 		}
 	}
+}
+
+func (c checkpoint) String() string {
+	buf := bytes.Buffer{}
+	buf.WriteString(fmt.Sprintf(
+		"SampledBefore: %v, MaxKnown: %v",
+		c.SampledBefore, c.MaxKnown))
+
+	if len(c.Failed) > 0 {
+		buf.WriteString(fmt.Sprintf("\nFailed: %v", c.Failed))
+	}
+
+	if len(c.Workers) > 0 {
+		buf.WriteString("\nWorkers: ")
+	}
+	for _, w := range c.Workers {
+		buf.WriteString(fmt.Sprintf("\n from: %v, to: %v", w.From, w.To))
+	}
+	return buf.String()
 }

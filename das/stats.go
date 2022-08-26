@@ -5,8 +5,8 @@ package das
 // over current network headers, and the `catchUp` routine which performs sampling
 // over past headers from the last sampled checkpoint.
 type SamplingStats struct {
-	// all headers before MinSampled were successfully sampled
-	MinSampled uint64 `json:"min_sampled_height"`
+	// all headers before SampledBefore were successfully sampled
+	SampledBefore uint64 `json:"sampled_before_height"`
 	// MaxKnown is the height of the newest known header
 	MaxKnown uint64 `json:"max_known_height"`
 	// Failed contains all skipped header's heights with corresponding try count

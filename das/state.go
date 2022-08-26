@@ -25,7 +25,7 @@ func initSamplingState(samplingRangeSize uint64, c checkpoint) coordinatorState 
 		rangeSize:     samplingRangeSize,
 		inProgress:    make(map[int]func() workerState),
 		failed:        c.Failed,
-		next:          c.MinSampled,
+		next:          c.SampledBefore + 1,
 		maxKnown:      c.MaxKnown,
 		catchUpDoneCh: make(chan struct{}),
 	}
@@ -45,8 +45,9 @@ func initSamplingState(samplingRangeSize uint64, c checkpoint) coordinatorState 
 		st.priority = append(st.priority, st.newJob(wk.From, wk.To, true))
 	}
 
-	if c.MinSampled == 0 {
-		c.MinSampled = 1
+	if c.SampledBefore == 0 {
+		c.SampledBefore = 1
+		c.MaxKnown = 1
 	}
 	return st
 }
@@ -74,6 +75,7 @@ func (s *coordinatorState) handleResult(res result) {
 func (s *coordinatorState) updateMaxKnown(last uint64) {
 	// seen this header before
 	if last <= s.maxKnown {
+		log.Warn("received head height: %, which is lower than previously known: %v", last, s.maxKnown)
 		return
 	}
 
@@ -155,7 +157,7 @@ func (s *coordinatorState) newJob(from, max uint64, fromPriority bool) job {
 
 func (s *coordinatorState) stats() SamplingStats {
 	workers := make([]WorkerStats, 0, len(s.inProgress))
-	minSampled := s.next - 1
+	sampledBefore := s.next - 1
 	failed := make(map[uint64]int)
 
 	// gather worker SamplingStats
@@ -174,31 +176,31 @@ func (s *coordinatorState) stats() SamplingStats {
 
 		for _, h := range wstats.failed {
 			failed[h]++
-			if h < minSampled {
-				minSampled = h - 1
+			if h < sampledBefore {
+				sampledBefore = h - 1
 			}
 		}
 
-		if wstats.Curr < minSampled {
-			minSampled = wstats.Curr - 1
+		if wstats.Curr < sampledBefore {
+			sampledBefore = wstats.Curr - 1
 		}
 	}
 
-	// set minSampled to minimum failed - 1
+	// set sampledBefore to minimum failed - 1
 	for h, count := range s.failed {
 		failed[h] += count
-		if h < minSampled {
-			minSampled = h - 1
+		if h < sampledBefore {
+			sampledBefore = h - 1
 		}
 	}
 
 	return SamplingStats{
-		MinSampled:  minSampled,
-		MaxKnown:    s.maxKnown,
-		Failed:      failed,
-		Workers:     workers,
-		Concurrency: len(workers),
-		CatchUpDone: s.catchUpDone,
+		SampledBefore: sampledBefore,
+		MaxKnown:      s.maxKnown,
+		Failed:        failed,
+		Workers:       workers,
+		Concurrency:   len(workers),
+		CatchUpDone:   s.catchUpDone,
 	}
 }
 

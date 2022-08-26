@@ -46,7 +46,7 @@ func TestDASerLifecycle(t *testing.T) {
 		checkpoint, err := daser.sampler.store.load(ctx)
 		require.NoError(t, err)
 		// ensure checkpoint is stored at 30
-		assert.EqualValues(t, 30, checkpoint.MinSampled)
+		assert.EqualValues(t, 30, checkpoint.SampledBefore)
 	}()
 	// wait for dasing catch-up routine to finish
 	select {
@@ -114,7 +114,7 @@ func TestDASer_Restart(t *testing.T) {
 	checkpoint, err := daser.sampler.store.load(ctx)
 	require.NoError(t, err)
 	// ensure checkpoint is stored at 45
-	assert.EqualValues(t, 60, checkpoint.MinSampled)
+	assert.EqualValues(t, 60, checkpoint.SampledBefore)
 }
 
 func TestDASer_stopsAfter_BEFP(t *testing.T) {

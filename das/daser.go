@@ -18,9 +18,10 @@ import (
 
 var log = logging.Logger("das")
 
+// TODO: parameters needs performance testing on real network to define optimal values
 const (
-	samplingRange           = 100
-	defaultConcurrencyLimit = 256
+	samplingRange           = 64
+	defaultConcurrencyLimit = 64
 	storeInterval           = 10 * time.Minute
 )
 
@@ -85,14 +86,14 @@ func (d *DASer) Start(ctx context.Context) error {
 		h, err := d.getter.Head(ctx)
 		if err == nil {
 			cp = checkpoint{
-				MinSampled: 1,
-				MaxKnown:   uint64(h.Height),
+				SampledBefore: 1,
+				MaxKnown:      uint64(h.Height),
 			}
 
-			log.Warnw("set max known height from store", "height", cp.MaxKnown)
+			log.Warnw("checkpoint not found, initializing with height 1")
 		}
 	}
-	log.Infow("loaded checkpoint", "height", cp)
+	log.Info("loaded checkpoint:\n", cp.String())
 
 	d.sampler.state = initSamplingState(samplingRange, cp)
 
@@ -124,8 +125,8 @@ func (d *DASer) Stop(ctx context.Context) error {
 	return d.subscriber.wait(ctx)
 }
 
-func (d *DASer) fetch(ctx context.Context, height uint64) error {
-	h, err := d.getter.GetByHeight(ctx, height)
+func (d *DASer) fetch(ctx context.Context, sampleHeight uint64) error {
+	h, err := d.getter.GetByHeight(ctx, sampleHeight)
 	if err != nil {
 		return fmt.Errorf("getting: %w", err)
 	}
