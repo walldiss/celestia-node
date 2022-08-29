@@ -9,10 +9,8 @@ import (
 )
 
 type worker struct {
-	lock     sync.Mutex
-	state    workerState
-	resultCh chan<- result
-	sample   func(context.Context, uint64) error
+	lock  sync.Mutex
+	state workerState
 }
 
 // workerState contains important information about the state of a
@@ -32,20 +30,15 @@ type job struct {
 	isPriority bool
 }
 
-func newWorker(
-	resultCh chan<- result,
-	sample func(context.Context, uint64) error) worker {
-	return worker{
-		resultCh: resultCh,
-		sample:   sample,
-	}
-}
-
-func (w *worker) run(ctx context.Context, j job) {
+func (w *worker) run(
+	ctx context.Context,
+	j job,
+	sample func(context.Context, uint64) error,
+	resultCh chan<- result) {
 	w.setStateFromJob(j)
 
 	for curr := j.from; curr <= j.to; curr++ {
-		err := w.sample(ctx, curr)
+		err := sample(ctx, curr)
 		w.setResult(curr, err)
 
 		select {
@@ -56,7 +49,7 @@ func (w *worker) run(ctx context.Context, j job) {
 	}
 
 	select {
-	case w.resultCh <- result{
+	case resultCh <- result{
 		job:    j,
 		failed: w.state.failed,
 		err:    w.state.Err,

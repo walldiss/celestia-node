@@ -33,7 +33,7 @@ func TestCheckpointStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer t.Cleanup(cancel)
-	ds.store(ctx, checkpoint)
+	assert.NoError(t, ds.store(ctx, checkpoint))
 	got, err := ds.load(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, checkpoint, got)

@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ipfs/go-datastore"
+	ds_sync "github.com/ipfs/go-datastore/sync"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,8 +24,8 @@ func TestCoordinator(t *testing.T) {
 	t.Run("test run", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		sampler := newMocksampler(sampleBefore, maxKnown)
-		store := newExpectStore(t, sampler.finalState)
+		sampler := newMockSampler(sampleBefore, maxKnown)
+		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
 		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
@@ -38,18 +41,19 @@ func TestCoordinator(t *testing.T) {
 			assert.NoError(t, ctx.Err())
 		case <-sampler.finishedCh:
 		}
-
 		cancel()
+
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.finished(stopCtx))
+		equalCheckpoint(ctx, t, sampler.finalState(), store)
 	})
 
 	t.Run("discovered new headers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		sampler := newMocksampler(sampleBefore, maxKnown)
-		store := newExpectStore(t, sampler.finalState)
+		sampler := newMockSampler(sampleBefore, maxKnown)
+		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
 		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
@@ -72,22 +76,23 @@ func TestCoordinator(t *testing.T) {
 			assert.NoError(t, ctx.Err())
 		case <-sampler.finishedCh:
 		}
-
 		cancel()
+
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.finished(stopCtx))
+		equalCheckpoint(ctx, t, sampler.finalState(), store)
 	})
 
 	t.Run("prioritize newly discovered over known", func(t *testing.T) {
 		sampleFrom := uint64(1)
 		maxKnown := uint64(10)
-		toBeDiscovered := uint64(21)
+		toBeDiscovered := uint64(20)
 		samplingRange := uint64(4)
 		concurrency := 1
 
-		sampler := newMocksampler(sampleFrom, maxKnown)
-		store := newExpectStore(t, sampler.finalState)
+		sampler := newMockSampler(sampleFrom, maxKnown)
+		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
@@ -130,18 +135,19 @@ func TestCoordinator(t *testing.T) {
 			assert.NoError(t, ctx.Err())
 		case <-sampler.finishedCh:
 		}
-
 		cancel()
+
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.finished(stopCtx))
+		equalCheckpoint(ctx, t, sampler.finalState(), store)
 	})
 
 	t.Run("priority routine should not lock other workers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		sampler := newMocksampler(sampleBefore, maxKnown)
-		store := newExpectStore(t, sampler.finalState)
+		sampler := newMockSampler(sampleBefore, maxKnown)
+		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		lk := newLock(sampleBefore, maxKnown) // lock all workers before start
 		coordinator := newSamplingCoordinator(concurrency,
@@ -180,11 +186,12 @@ func TestCoordinator(t *testing.T) {
 			assert.NoError(t, ctx.Err())
 		case <-sampler.finishedCh:
 		}
-
 		cancel()
+
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.finished(stopCtx))
+		equalCheckpoint(ctx, t, sampler.finalState(), store)
 	})
 
 	t.Run("failed should be stored", func(t *testing.T) {
@@ -192,20 +199,23 @@ func TestCoordinator(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
 		bornToFail := []uint64{4, 8, 15, 16, 23, 42}
-		sampler := newMocksampler(sampleFrom, maxKnown, bornToFail...)
+		sampler := newMockSampler(sampleFrom, maxKnown, bornToFail...)
+		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
-		//
+		// set failed items in expectedState
 		expectedState := sampler.finalState()
 		expectedState.SampledBefore = bornToFail[0]
+		expectedState.Failed = make(map[uint64]int)
 		for _, h := range bornToFail {
 			expectedState.Failed[h] = 1
 		}
 
-		store := newExpectStore(t, func() checkpoint { return expectedState })
-
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
 		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
+
+		// wait for coordinator to finish catchup
+		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 
 		// check if all jobs were sampled successfully
 		select {
@@ -213,14 +223,12 @@ func TestCoordinator(t *testing.T) {
 			assert.NoError(t, ctx.Err())
 		case <-sampler.finishedCh:
 		}
-
-		// wait for coordinator to finish catchup
-		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
-
 		cancel()
+
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.finished(stopCtx))
+		equalCheckpoint(ctx, t, expectedState, store)
 	})
 
 	t.Run("failed should retry on restart", func(t *testing.T) {
@@ -230,18 +238,21 @@ func TestCoordinator(t *testing.T) {
 		failedLastRun := map[uint64]int{4: 1, 8: 2, 15: 1, 16: 1, 23: 1, 42: 1}
 		failedAgain := []uint64{16}
 
-		sampler := newMocksampler(sampleFrom, maxKnown, failedAgain...)
+		sampler := newMockSampler(sampleFrom, maxKnown, failedAgain...)
 		sampler.checkpoint.Failed = failedLastRun
 
 		expectedState := sampler.checkpoint
 		expectedState.SampledBefore = failedAgain[0]
 		expectedState.Failed = map[uint64]int{16: 3}
 
-		store := newExpectStore(t, func() checkpoint { return expectedState })
+		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
 		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
+
+		// wait for coordinator to finish catchup
+		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 
 		// check if all jobs were sampled successfully
 		select {
@@ -249,14 +260,12 @@ func TestCoordinator(t *testing.T) {
 			assert.NoError(t, ctx.Err())
 		case <-sampler.finishedCh:
 		}
-
-		// wait for coordinator to finish catchup
-		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
-
 		cancel()
+
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.finished(stopCtx))
+		equalCheckpoint(ctx, t, expectedState, store)
 	})
 }
 
@@ -269,7 +278,7 @@ func BenchmarkCoordinator(b *testing.B) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		coordinator := newSamplingCoordinator(concurrency,
 			func(ctx context.Context, u uint64) error { return nil },
-			dummyStore{})
+			wrapCheckpointStore(datastore.NewNullDatastore()))
 		coordinator.state = initSamplingState(samplingRange, checkpoint{
 			SampledBefore: 1,
 			MaxKnown:      uint64(b.N),
@@ -284,8 +293,8 @@ func BenchmarkCoordinator(b *testing.B) {
 	})
 }
 
-// ensures all headers are sampled in range except once that are born to fail
-type mocksampler struct {
+// ensures all headers are sampled in range except ones that are born to fail
+type mockSampler struct {
 	lock sync.Mutex
 
 	checkpoint
@@ -296,17 +305,17 @@ type mocksampler struct {
 	finishedCh chan struct{}
 }
 
-func newMocksampler(sampledBefore, sampleTo uint64, bornToFail ...uint64) mocksampler {
+func newMockSampler(sampledBefore, sampleTo uint64, bornToFail ...uint64) mockSampler {
 	failMap := make(map[uint64]bool)
 	for _, h := range bornToFail {
 		failMap[h] = true
 	}
-	return mocksampler{
+	return mockSampler{
 		checkpoint: checkpoint{
 			SampledBefore: sampledBefore,
 			MaxKnown:      sampleTo,
-			Failed:        make(map[uint64]int),
-			Workers:       make([]workerCheckpoint, 0),
+			Failed:        nil,
+			Workers:       nil,
 		},
 		bornToFail: failMap,
 		done:       make(map[uint64]int),
@@ -314,7 +323,7 @@ func newMocksampler(sampledBefore, sampleTo uint64, bornToFail ...uint64) mocksa
 	}
 }
 
-func (m *mocksampler) sample(ctx context.Context, h uint64) error {
+func (m *mockSampler) sample(ctx context.Context, h uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -338,19 +347,19 @@ func (m *mocksampler) sample(ctx context.Context, h uint64) error {
 	return nil
 }
 
-func (m *mocksampler) heightIsDone(h uint64) bool {
+func (m *mockSampler) heightIsDone(h uint64) bool {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return m.done[h] != 0
 }
 
-func (m *mocksampler) doneAmount() int {
+func (m *mockSampler) doneAmount() int {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return len(m.done)
 }
 
-func (m *mocksampler) finalState() checkpoint {
+func (m *mockSampler) finalState() checkpoint {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -359,7 +368,7 @@ func (m *mocksampler) finalState() checkpoint {
 	return finalState
 }
 
-func (m *mocksampler) discover(ctx context.Context, newHeight uint64, emit func(ctx context.Context, h uint64)) {
+func (m *mockSampler) discover(ctx context.Context, newHeight uint64, emit func(ctx context.Context, h uint64)) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -373,7 +382,7 @@ func (m *mocksampler) discover(ctx context.Context, newHeight uint64, emit func(
 	emit(ctx, newHeight)
 }
 
-func (m *mocksampler) sampledAmount() int {
+func (m *mockSampler) sampledAmount() int {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return len(m.done)
@@ -525,34 +534,8 @@ func (l *lock) middleWare(out sampleFn) sampleFn {
 	}
 }
 
-type dummyStore struct {
-}
-
-func (m dummyStore) load(ctx context.Context) (checkpoint, error) {
-	return checkpoint{}, nil
-}
-
-func (m dummyStore) store(ctx context.Context, cp checkpoint) {
-}
-
-// checks the stored checkpoint is correct
-type expectStore struct {
-	*testing.T
-	dummyStore
-	expect func() checkpoint
-}
-
-func newExpectStore(t *testing.T, expect func() checkpoint) checkpointStore {
-	return &expectStore{
-		T:      t,
-		expect: expect,
-	}
-}
-
-func (m *expectStore) store(_ context.Context, cp checkpoint) {
-	expected := m.expect()
-	if len(expected.Failed) == 0 {
-		expected.Failed = make(map[uint64]int)
-	}
-	assert.Equal(m, expected, cp)
+func equalCheckpoint(ctx context.Context, t *testing.T, expected checkpoint, store *store) {
+	cp, err := store.load(ctx)
+	assert.NoError(t, err, err)
+	assert.Equal(t, expected, cp)
 }

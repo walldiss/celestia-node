@@ -20,9 +20,15 @@ var log = logging.Logger("das")
 
 // TODO: parameters needs performance testing on real network to define optimal values
 const (
-	samplingRange           = 64
+	// samplingCoordinator will paginate headers into jobs with fixed size.
+	//  samplingRange is the maximum amount of headers processed in one job.
+	samplingRange = 64
+
+	// defaultConcurrencyLimit defines maximum amount of sampling workers running in parallel.
 	defaultConcurrencyLimit = 64
-	storeInterval           = 10 * time.Minute
+
+	// backgroundStoreInterval is e period of time for background store to perform a checkpoint backup.
+	backgroundStoreInterval = 10 * time.Minute
 )
 
 // DASer continuously validates availability of data committed to headers.
@@ -101,7 +107,7 @@ func (d *DASer) Start(ctx context.Context) error {
 
 	go d.sampler.run(runCtx)
 	go d.subscriber.run(runCtx, sub, d.sampler.listen)
-	go d.intervalStore.run(runCtx, storeInterval)
+	go d.intervalStore.run(runCtx, backgroundStoreInterval)
 
 	return nil
 }
@@ -109,7 +115,7 @@ func (d *DASer) Start(ctx context.Context) error {
 // Stop stops sampling.
 func (d *DASer) Stop(ctx context.Context) error {
 	if !atomic.CompareAndSwapInt32(&d.running, 1, 0) {
-		return fmt.Errorf("da: DASer already stopped")
+		return nil
 	}
 
 	d.cancel()

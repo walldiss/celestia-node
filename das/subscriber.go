@@ -27,7 +27,7 @@ func (s *subscriber) run(ctx context.Context, sub header.Subscription, emit list
 				return
 			}
 
-			log.Errorw("failed to get next header", "Err", err)
+			log.Errorw("new header received via subscription", "Err", err)
 			continue
 		}
 		log.Infow("found new header", "height", h.Height)

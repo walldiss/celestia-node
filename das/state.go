@@ -87,7 +87,7 @@ func (s *coordinatorState) updateMaxKnown(last uint64) {
 		s.priority = append(s.priority, s.newJob(from, last, true))
 	}
 
-	log.Debug("added recent headers to DASer priority queue ", "from_height", s.maxKnown, "to_height", last)
+	log.Debugw("added recent headers to DASer priority queue ", "from_height", s.maxKnown, "to_height", last)
 	s.maxKnown = last
 	s.checkDone()
 }

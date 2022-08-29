@@ -9,7 +9,7 @@ import (
 type samplingCoordinator struct {
 	concurrencyLimit int
 	sampleFn         sampleFn
-	store            checkpointStore
+	store            *store
 
 	state coordinatorState
 
@@ -31,7 +31,7 @@ type result struct {
 func newSamplingCoordinator(
 	concurrency int,
 	sample sampleFn,
-	store checkpointStore) *samplingCoordinator {
+	store *store) *samplingCoordinator {
 	return &samplingCoordinator{
 		concurrencyLimit: concurrency,
 		sampleFn:         sample,
@@ -72,14 +72,14 @@ func (sm *samplingCoordinator) run(ctx context.Context) {
 
 // runWorker runs job in separate worker go-routine
 func (sm *samplingCoordinator) runWorker(ctx context.Context, j job) {
-	w := newWorker(sm.resultCh, sm.sampleFn)
+	w := worker{}
 	sm.state.putInProgress(j.id, w.getState)
 
 	// launch worker go-routine
 	sm.workersWg.Add(1)
 	go func() {
 		defer sm.workersWg.Done()
-		w.run(ctx, j)
+		w.run(ctx, j, sm.sampleFn, sm.resultCh)
 	}()
 }
 
@@ -89,13 +89,17 @@ func (sm *samplingCoordinator) finished(ctx context.Context) error {
 	if err := sm.coordinatorDone.wait(ctx); err != nil {
 		return err
 	}
-	sm.store.store(ctx, newCheckpoint(sm.state.stats()))
+	if err := sm.store.store(ctx, newCheckpoint(sm.state.stats())); err != nil {
+		log.Errorw("storing checkpoint to disk", "Err", err)
+	}
 
 	// wait for all worker routines to finish
 	if err := sm.workersDone.wait(ctx); err != nil {
 		return err
 	}
-	sm.store.store(ctx, newCheckpoint(sm.state.stats()))
+	if err := sm.store.store(ctx, newCheckpoint(sm.state.stats())); err != nil {
+		log.Errorw("storing checkpoint to disk", "Err", err)
+	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package das
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/ipfs/go-datastore"
@@ -14,42 +15,31 @@ var (
 	checkpointKey = datastore.NewKey("checkpoint")
 )
 
-type checkpointStore interface {
-	load(ctx context.Context) (checkpoint, error)
-	store(ctx context.Context, cp checkpoint)
-}
-
-type dataStore struct {
+// The checkpoint store stores/loads the DASer's checkpoint to/from
+// disk using the checkpointKey. The checkpoint is stored as a struct
+// representation of the latest successfully DASed state.
+type store struct {
 	datastore.Datastore
 }
 
 // backgroundStore periodically saves current sampling state in case of DASer force quit before
-// being able saving state on exit
+// being able to store state on exit
 type backgroundStore struct {
-	store    checkpointStore
+	store    *store
 	getStats func(ctx context.Context) (checkpoint, error)
 	done
 }
 
-// wrapCheckpointStore wraps the given datastore.Datastore with the `das`
-// prefix. The checkpoint store stores/loads the DASer's checkpoint to/from
-// disk using the checkpointKey. The checkpoint is stored as an uint64
-// representation of the height of the latest successfully DASed header.
-func wrapCheckpointStore(ds datastore.Datastore) checkpointStore {
-	return &dataStore{namespace.Wrap(ds, storePrefix)}
+// wrapCheckpointStore wraps the given datastore.Datastore with the `das` prefix.
+func wrapCheckpointStore(ds datastore.Datastore) *store {
+	return &store{namespace.Wrap(ds, storePrefix)}
 }
 
 // loadCheckpoint loads the DAS checkpoint from disk and returns it.
-// If there is no known checkpoint, it returns height 0.
-func (s *dataStore) load(ctx context.Context) (checkpoint, error) {
+// If there is no known checkpoint, it returns a zero-value.
+func (s *store) load(ctx context.Context) (checkpoint, error) {
 	bs, err := s.Get(ctx, checkpointKey)
 	if err != nil {
-		// if no checkpoint was found, return zero-value checkpoint
-		if err == datastore.ErrNotFound {
-			log.Debug("checkpoint not found, starting sampling at block height 1")
-			return checkpoint{}, nil
-		}
-
 		return checkpoint{}, err
 	}
 
@@ -59,24 +49,27 @@ func (s *dataStore) load(ctx context.Context) (checkpoint, error) {
 }
 
 // storeCheckpoint stores the given DAS checkpoint to disk.
-func (s *dataStore) store(ctx context.Context, cp checkpoint) {
+func (s *store) store(ctx context.Context, cp checkpoint) error {
 	// store latest DASed checkpoint to disk here to ensure that if DASer is not yet
 	// fully caught up to network head, it will resume DASing from this checkpoint
 	// up to current network head
 	bs, err := json.Marshal(cp)
 	if err != nil {
-		log.Errorw("marshal checkpoint", "Err", err)
-		return
+		return fmt.Errorf("marshal checkpoint: %w", err)
 	}
 
 	if err = s.Put(ctx, checkpointKey, bs); err != nil {
-		log.Errorw("storing checkpoint to disk", "Err", err)
+		return err
 	}
+
 	log.Info("stored checkpoint to disk\n", cp.String())
+	return nil
 }
 
-func newBackgroundStore(store checkpointStore,
-	getStats func(ctx context.Context) (checkpoint, error)) backgroundStore {
+func newBackgroundStore(
+	store *store,
+	getStats func(ctx context.Context) (checkpoint, error),
+) backgroundStore {
 	return backgroundStore{
 		store:    store,
 		getStats: getStats,
@@ -84,31 +77,36 @@ func newBackgroundStore(store checkpointStore,
 	}
 }
 
+// run launches backgroundStore routine. Could be disabled by passing storeInterval = 0
 func (bgs *backgroundStore) run(ctx context.Context, storeInterval time.Duration) {
 	defer bgs.Done()
 
 	if storeInterval == 0 {
-		// run store routine only when storeInterval is non 0
-		return
+		return // no need to run backgroundStore
 	}
-	storeTicker := time.NewTicker(storeInterval)
 
-	var prevSampledBefore uint64
+	ticker := time.NewTicker(storeInterval)
+	defer ticker.Stop()
+
+	var prev uint64
 	for {
-		// blocked by ticker to perform store only once in period of time
+		// blocked by ticker to perform store only once in a period of time
 		select {
-		case <-storeTicker.C:
+		case <-ticker.C:
 		case <-ctx.Done():
 			return
 		}
 
 		cp, err := bgs.getStats(ctx)
 		if err != nil {
+			log.Debug("DASer coordinator stats are unavailable")
 			continue
 		}
-		if cp.SampledBefore > prevSampledBefore {
-			bgs.store.store(ctx, cp)
-			prevSampledBefore = cp.SampledBefore
+		if cp.SampledBefore > prev {
+			if err = bgs.store.store(ctx, cp); err != nil {
+				log.Errorw("storing checkpoint to disk", "Err", err)
+			}
+			prev = cp.SampledBefore
 		}
 	}
 }

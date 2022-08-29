@@ -144,7 +144,7 @@ func TestDASer_stopsAfter_BEFP(t *testing.T) {
 	resultCh := make(chan error)
 	go fraud.OnProof(newCtx, f, fraud.BadEncoding,
 		func(fraud.Proof) {
-			resultCh <- daser.Stop(ctx)
+			resultCh <- daser.Stop(newCtx)
 		})
 
 	require.NoError(t, daser.Start(newCtx))
