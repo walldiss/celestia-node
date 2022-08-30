@@ -6,10 +6,11 @@ import (
 )
 
 type checkpoint struct {
-	SampledBefore uint64             `json:"sampled_before"`
-	MaxKnown      uint64             `json:"max_known"`
-	Failed        map[uint64]int     `json:"failed,omitempty"` // failed will be put in priority on restart
-	Workers       []workerCheckpoint `json:"workers,omitempty"`
+	SampledBefore uint64 `json:"sampled_before"`
+	MaxKnown      uint64 `json:"max_known"`
+	// Failed will be prioritized on restart
+	Failed  map[uint64]int     `json:"failed,omitempty"`
+	Workers []workerCheckpoint `json:"workers,omitempty"`
 }
 
 // workerCheckpoint will be used to resume worker on restart

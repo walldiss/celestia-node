@@ -53,7 +53,7 @@ func (s *store) store(ctx context.Context, cp checkpoint) error {
 	// store latest DASed checkpoint to disk here to ensure that if DASer is not yet
 	// fully caught up to network head, it will resume DASing from this checkpoint
 	// up to current network head
-	bs, err := json.Marshal(checkpoint{})
+	bs, err := json.Marshal(cp)
 	if err != nil {
 		return fmt.Errorf("marshal checkpoint: %w", err)
 	}
