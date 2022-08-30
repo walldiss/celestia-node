@@ -13,10 +13,11 @@ sufficiently likely that all block data is available as it is assumed that there
 are enough `light` availability instances active on the network doing sampling over
 the same block to collectively verify its availability.
 
-The central component of this package is the `samplingCoordinator`. It launches workers that
-perform DAS on new ExtendedHeaders in the network. The DASer kicks off this loop by loading
-its last DASed header (`checkpoint`) and kicking off worker pool
-to DAS all headers between the checkpoint and the current network head. It simultaneously
-continues to perform DAS over new ExtendedHeaders received via gossipsub.
+The central component of this package is the `samplingCoordinator`. It launches parallel
+workers that perform DAS on new ExtendedHeaders in the network. The DASer kicks off this
+loop by loading its last DASed headers snapshot (`checkpoint`) and kicking off worker pool
+to DAS all headers between the checkpoint and the current network head. It subscribes
+to notifications about to new ExtendedHeaders, received via gossipsub. Newly found headers
+are being put into higher priority queue and will be sampled by the next available worker.
 */
 package das

@@ -74,20 +74,24 @@ func (s *coordinatorState) handleResult(res result) {
 func (s *coordinatorState) updateMaxKnown(last uint64) {
 	// seen this header before
 	if last <= s.maxKnown {
-		log.Warn("received head height: %, which is lower than previously known: %v", last, s.maxKnown)
+		log.Warnf("received head height: %v, which is lower or the same as previously known: %v", last, s.maxKnown)
 		return
 	}
 
 	if s.maxKnown == 1 {
+		s.maxKnown = last
 		log.Infow("found first header, starting sampling")
+		return
 	}
 
 	// add most recent headers into priority queue
-	for from := s.maxKnown + 1; from <= last; from += s.rangeSize {
+	from := s.maxKnown + 1
+	for from <= last && len(s.priority) < priorityCap {
 		s.priority = append(s.priority, s.newJob(from, last, true))
+		from += s.rangeSize
 	}
 
-	log.Debugw("added recent headers to DASer priority queue ", "from_height", s.maxKnown, "to_height", last)
+	log.Debugw("added recent headers to DASer priority queue", "from_height", s.maxKnown, "to_height", last)
 	s.maxKnown = last
 	s.checkDone()
 }

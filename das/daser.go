@@ -25,10 +25,13 @@ const (
 	samplingRange = 64
 
 	// defaultConcurrencyLimit defines maximum amount of sampling workers running in parallel.
-	defaultConcurrencyLimit = 64
+	defaultConcurrencyLimit = 16
 
 	// backgroundStoreInterval is e period of time for background store to perform a checkpoint backup.
 	backgroundStoreInterval = 10 * time.Minute
+
+	// priorityCap defines size limit of priority queue
+	priorityCap = defaultConcurrencyLimit * 4
 )
 
 // DASer continuously validates availability of data committed to headers.
