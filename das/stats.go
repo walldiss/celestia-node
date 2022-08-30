@@ -17,7 +17,7 @@ type SamplingStats struct {
 	Concurrency int `json:"concurrency"`
 	// CatchUpDone indicates whether all known headers are sampled
 	CatchUpDone bool `json:"catch_up_done"`
-	// IsRunning tracks whether routine is running
+	// IsRunning tracks whether the DASer service is running'
 	IsRunning bool `json:"is_running"`
 }
 
