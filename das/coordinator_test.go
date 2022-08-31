@@ -28,7 +28,7 @@ func TestCoordinator(t *testing.T) {
 		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
-		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
+		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
 		// wait for coordinator to finish catchup
@@ -56,7 +56,7 @@ func TestCoordinator(t *testing.T) {
 		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
-		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
+		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
 		time.Sleep(50 * time.Millisecond)
@@ -110,7 +110,7 @@ func TestCoordinator(t *testing.T) {
 				order.middleWare(
 					sampler.sample)),
 			store)
-		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
+		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
 		// wait for worker to pick up first job
@@ -152,7 +152,7 @@ func TestCoordinator(t *testing.T) {
 		lk := newLock(sampleBefore, maxKnown) // lock all workers before start
 		coordinator := newSamplingCoordinator(concurrency,
 			lk.middleWare(sampler.sample), store)
-		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
+		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
 		time.Sleep(50 * time.Millisecond)
@@ -211,7 +211,7 @@ func TestCoordinator(t *testing.T) {
 		}
 
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
-		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
+		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
 		// wait for coordinator to finish catchup
@@ -248,7 +248,7 @@ func TestCoordinator(t *testing.T) {
 		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
-		coordinator.state = initSamplingState(samplingRange, sampler.checkpoint)
+		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
 		// wait for coordinator to finish catchup
@@ -279,7 +279,7 @@ func BenchmarkCoordinator(b *testing.B) {
 		coordinator := newSamplingCoordinator(concurrency,
 			func(ctx context.Context, u uint64) error { return nil },
 			wrapCheckpointStore(datastore.NewNullDatastore()))
-		coordinator.state = initSamplingState(samplingRange, checkpoint{
+		coordinator.state = initCoordinatorState(samplingRange, checkpoint{
 			SampledBefore: 1,
 			MaxKnown:      uint64(b.N),
 		})

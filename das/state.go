@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-// represents current state of sampling
+// coordinatorState represents current state of sampling
 type coordinatorState struct {
 	rangeSize uint64
 
@@ -20,7 +20,7 @@ type coordinatorState struct {
 	catchUpDoneCh chan struct{} // blocks until all headers are sampled
 }
 
-func initSamplingState(samplingRangeSize uint64, c checkpoint) coordinatorState {
+func initCoordinatorState(samplingRangeSize uint64, c checkpoint) coordinatorState {
 	st := coordinatorState{
 		rangeSize:     samplingRangeSize,
 		inProgress:    make(map[int]func() workerState),
@@ -45,9 +45,6 @@ func initSamplingState(samplingRangeSize uint64, c checkpoint) coordinatorState 
 		st.priority = append(st.priority, st.newJob(wk.From, wk.To, true))
 	}
 
-	if c.SampledBefore == 0 {
-		st.next, st.maxKnown = 1, 1
-	}
 	return st
 }
 

@@ -16,7 +16,7 @@ func TestCheckpointStore(t *testing.T) {
 	failed := make(map[uint64]int)
 	failed[2] = 1
 	failed[3] = 2
-	checkpoint := checkpoint{
+	cp := checkpoint{
 		SampledBefore: 1,
 		MaxKnown:      6,
 		Failed:        failed,
@@ -33,8 +33,8 @@ func TestCheckpointStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer t.Cleanup(cancel)
-	assert.NoError(t, ds.store(ctx, checkpoint))
+	assert.NoError(t, ds.store(ctx, cp))
 	got, err := ds.load(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, checkpoint, got)
+	assert.Equal(t, cp, got)
 }

@@ -91,19 +91,20 @@ func (d *DASer) Start(ctx context.Context) error {
 	// load latest DASed checkpoint
 	cp, err := d.sampler.store.load(ctx)
 	if err != nil {
-		h, err := d.getter.Head(ctx)
-		if err == nil {
-			cp = checkpoint{
-				SampledBefore: 1,
-				MaxKnown:      uint64(h.Height),
-			}
+		log.Warnw("checkpoint not found, initializing with height 1")
 
-			log.Warnw("checkpoint not found, initializing with height 1")
+		cp = checkpoint{
+			SampledBefore: 1,
+			MaxKnown:      1,
+		}
+
+		if h, err := d.getter.Head(ctx); err == nil {
+			cp.MaxKnown = uint64(h.Height)
 		}
 	}
-	log.Info("loaded checkpoint:\n", cp.String())
+	log.Info("starting DASer from checkpoint:\n", cp.String())
 
-	d.sampler.state = initSamplingState(samplingRange, cp)
+	d.sampler.state = initCoordinatorState(samplingRange, cp)
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
