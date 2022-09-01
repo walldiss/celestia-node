@@ -104,7 +104,7 @@ func (d *DASer) Start(ctx context.Context) error {
 		// attempt to get head info. No need to handle error, later DASer
 		// will be able to find new head from subscriber after it is started
 		if h, err := d.getter.Head(ctx); err == nil {
-			cp.SampleFrom = uint64(h.Height)
+			cp.NetworkHead = uint64(h.Height)
 		}
 	}
 	log.Info("starting DASer from checkpoint: ", cp.String())
@@ -116,7 +116,7 @@ func (d *DASer) Start(ctx context.Context) error {
 
 	go d.sampler.run(runCtx)
 	go d.subscriber.run(runCtx, sub, d.sampler.listen)
-	go d.intervalStore.run(runCtx, backgroundStoreInterval)
+	go d.intervalStore.run(runCtx, backgroundStoreInterval, d.cstore, d.sampler.getCheckpoint)
 
 	return nil
 }

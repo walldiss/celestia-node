@@ -158,7 +158,7 @@ func (s *coordinatorState) newJob(from, max uint64, fromPriority bool) job {
 // unsafeStats collects coordinator stats without any sync guarantees
 func (s *coordinatorState) unsafeStats() SamplingStats {
 	workers := make([]WorkerStats, 0, len(s.inProgress))
-	headOfSampledChain := s.next
+	lowestFailedOrInProgress := s.next
 	failed := make(map[uint64]int)
 
 	// gather worker SamplingStats
@@ -177,26 +177,26 @@ func (s *coordinatorState) unsafeStats() SamplingStats {
 
 		for _, h := range wstats.failed {
 			failed[h]++
-			if h < headOfSampledChain {
-				headOfSampledChain = h
+			if h < lowestFailedOrInProgress {
+				lowestFailedOrInProgress = h
 			}
 		}
 
-		if wstats.Curr < headOfSampledChain {
-			headOfSampledChain = wstats.Curr
+		if wstats.Curr < lowestFailedOrInProgress {
+			lowestFailedOrInProgress = wstats.Curr
 		}
 	}
 
-	// set headOfSampledChain to minimum failed - 1
+	// set lowestFailedOrInProgress to minimum failed - 1
 	for h, count := range s.failed {
 		failed[h] += count
-		if h < headOfSampledChain {
-			headOfSampledChain = h
+		if h < lowestFailedOrInProgress {
+			lowestFailedOrInProgress = h
 		}
 	}
 
 	return SamplingStats{
-		HeadOfSampledChain: headOfSampledChain - 1,
+		HeadOfSampledChain: lowestFailedOrInProgress - 1,
 		NetworkHead:        s.networkHead,
 		Failed:             failed,
 		Workers:            workers,

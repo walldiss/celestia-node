@@ -118,7 +118,7 @@ func TestDASer_Restart(t *testing.T) {
 }
 
 func TestDASer_stopsAfter_BEFP(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	t.Cleanup(cancel)
 
 	ds := ds_sync.MutexWrap(datastore.NewMapDatastore())
