@@ -39,15 +39,15 @@ func Test_coordinatorStats(t *testing.T) {
 						}
 					},
 				},
-				failed:    map[uint64]int{22: 1, 23: 1, 24: 2},
-				nextJobID: 0,
-				next:      31,
-				maxKnown:  100,
+				failed:      map[uint64]int{22: 1, 23: 1, 24: 2},
+				nextJobID:   0,
+				next:        31,
+				networkHead: 100,
 			},
 			SamplingStats{
-				SampledBefore: 12,
-				MaxKnown:      100,
-				Failed:        map[uint64]int{22: 2, 23: 1, 24: 2, 12: 1, 13: 1},
+				HeadOfSampledChain: 11,
+				NetworkHead:        100,
+				Failed:             map[uint64]int{22: 2, 23: 1, 24: 2, 12: 1, 13: 1},
 				Workers: []WorkerStats{
 					{
 						Curr:   25,
@@ -70,11 +70,11 @@ func Test_coordinatorStats(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stats := tt.state.stats()
+			stats := tt.state.unsafeStats()
 			sort.Slice(stats.Workers, func(i, j int) bool {
 				return stats.Workers[i].From > stats.Workers[j].Curr
 			})
-			assert.Equalf(t, tt.want, stats, "stats()")
+			assert.Equal(t, tt.want, stats, "stats are not equal")
 		})
 	}
 }

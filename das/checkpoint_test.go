@@ -17,9 +17,9 @@ func TestCheckpointStore(t *testing.T) {
 	failed[2] = 1
 	failed[3] = 2
 	cp := checkpoint{
-		SampledBefore: 1,
-		MaxKnown:      6,
-		Failed:        failed,
+		SampleFrom:  1,
+		NetworkHead: 6,
+		Failed:      failed,
 		Workers: []workerCheckpoint{
 			{
 				From: 1,

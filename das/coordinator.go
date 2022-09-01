@@ -9,7 +9,6 @@ import (
 type samplingCoordinator struct {
 	concurrencyLimit int
 	sampleFn         sampleFn
-	store            *store
 
 	state coordinatorState
 
@@ -17,9 +16,8 @@ type samplingCoordinator struct {
 	updMaxCh chan uint64 // signals to update max known header height
 	waitCh   chan func() // blocks coordinator for external access to state
 
-	workersWg       sync.WaitGroup
-	workersDone     done
-	coordinatorDone done
+	workersWg sync.WaitGroup
+	done
 }
 
 type result struct {
@@ -30,17 +28,14 @@ type result struct {
 
 func newSamplingCoordinator(
 	concurrency int,
-	sample sampleFn,
-	store *store) *samplingCoordinator {
+	sample sampleFn) *samplingCoordinator {
 	return &samplingCoordinator{
 		concurrencyLimit: concurrency,
 		sampleFn:         sample,
-		store:            store,
 		resultCh:         make(chan result),
 		updMaxCh:         make(chan uint64),
 		waitCh:           make(chan func()),
-		workersDone:      newDone("workers"),
-		coordinatorDone:  newDone("sampling coordinator"),
+		done:             newDone("sampling coordinator"),
 	}
 }
 
@@ -56,15 +51,14 @@ func (sm *samplingCoordinator) run(ctx context.Context) {
 
 		select {
 		case max := <-sm.updMaxCh:
-			sm.state.updateMaxKnown(max)
+			sm.state.updateHead(max)
 		case res := <-sm.resultCh:
 			sm.state.handleResult(res)
 		case wait := <-sm.waitCh:
 			wait()
 		case <-ctx.Done():
-			sm.coordinatorDone.Done()
 			sm.workersWg.Wait()
-			sm.workersDone.Done()
+			sm.indicateDone()
 			return
 		}
 	}
@@ -83,26 +77,6 @@ func (sm *samplingCoordinator) runWorker(ctx context.Context, j job) {
 	}()
 }
 
-// finished stores last sampling state to internal storage and waits for all routines to finish
-func (sm *samplingCoordinator) finished(ctx context.Context) error {
-	// wait for coordinator to exit and store state
-	if err := sm.coordinatorDone.wait(ctx); err != nil {
-		return err
-	}
-	if err := sm.store.store(ctx, newCheckpoint(sm.state.stats())); err != nil {
-		log.Errorw("storing checkpoint to disk", "Err", err)
-	}
-
-	// wait for all worker routines to finish
-	if err := sm.workersDone.wait(ctx); err != nil {
-		return err
-	}
-	if err := sm.store.store(ctx, newCheckpoint(sm.state.stats())); err != nil {
-		log.Errorw("storing checkpoint to disk", "Err", err)
-	}
-	return nil
-}
-
 // listen notifies coordinator about new header height has been found
 func (sm *samplingCoordinator) listen(ctx context.Context, height uint64) {
 	select {
@@ -111,8 +85,8 @@ func (sm *samplingCoordinator) listen(ctx context.Context, height uint64) {
 	}
 }
 
-// listens for new headers to keep maxHeader up-to-date
-func (sm *samplingCoordinator) getStats(ctx context.Context) (SamplingStats, error) {
+// stats pause coordinator to get stats in concurrently safe manner
+func (sm *samplingCoordinator) stats(ctx context.Context) (SamplingStats, error) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	defer wg.Done()
@@ -123,11 +97,11 @@ func (sm *samplingCoordinator) getStats(ctx context.Context) (SamplingStats, err
 		return SamplingStats{}, ctx.Err()
 	}
 
-	return sm.state.stats(), nil
+	return sm.state.unsafeStats(), nil
 }
 
 func (sm *samplingCoordinator) getCheckpoint(ctx context.Context) (checkpoint, error) {
-	stats, err := sm.getStats(ctx)
+	stats, err := sm.stats(ctx)
 	if err != nil {
 		return checkpoint{}, err
 	}

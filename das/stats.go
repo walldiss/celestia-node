@@ -5,10 +5,10 @@ package das
 // over current network headers, and the `catchUp` routine which performs sampling
 // over past headers from the last sampled checkpoint.
 type SamplingStats struct {
-	// all headers before SampledBefore were successfully sampled
-	SampledBefore uint64 `json:"sampled_before_height"`
-	// MaxKnown is the height of the newest known header
-	MaxKnown uint64 `json:"max_known_height"`
+	// all headers before HeadOfSampledChain were successfully sampled
+	HeadOfSampledChain uint64 `json:"sampled_before_height"`
+	// NetworkHead is the height of the most recent header in the network
+	NetworkHead uint64 `json:"network_head_height"`
 	// Failed contains all skipped header's heights with corresponding try count
 	Failed map[uint64]int `json:"failed,omitempty"`
 	// Workers has information about each currently running worker stats
@@ -22,7 +22,7 @@ type SamplingStats struct {
 }
 
 type WorkerStats struct {
-	Curr uint64 `json:"curr"`
+	Curr uint64 `json:"current"`
 	From uint64 `json:"from"`
 	To   uint64 `json:"to"`
 

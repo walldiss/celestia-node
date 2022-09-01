@@ -43,18 +43,18 @@ func TestDASerLifecycle(t *testing.T) {
 		require.NoError(t, err)
 
 		// load checkpoint and ensure it's at network head
-		checkpoint, err := daser.sampler.store.load(ctx)
+		checkpoint, err := daser.cstore.load(ctx)
 		require.NoError(t, err)
 		// ensure checkpoint is stored at 30
-		assert.EqualValues(t, 30, checkpoint.SampledBefore-1)
+		assert.EqualValues(t, 30, checkpoint.SampleFrom-1)
 	}()
-	// wait for dasing catch-up routine to finish
+	// wait for dasing catch-up routine to indicateDone
 	select {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	case <-mockGet.doneCh:
 	}
-	// give catch-up routine a second to finish up sampling last header
+	// give catch-up routine a second to indicateDone up sampling last header
 	assert.NoError(t, daser.sampler.state.waitCatchUp(ctx))
 }
 
@@ -73,7 +73,7 @@ func TestDASer_Restart(t *testing.T) {
 	err := daser.Start(ctx)
 	require.NoError(t, err)
 
-	// wait for dasing catch-up routine to finish
+	// wait for dasing catch-up routine to indicateDone
 	select {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
@@ -99,7 +99,7 @@ func TestDASer_Restart(t *testing.T) {
 	err = daser.Start(restartCtx)
 	require.NoError(t, err)
 
-	// wait for dasing catch-up routine to finish
+	// wait for dasing catch-up routine to indicateDone
 	select {
 	case <-restartCtx.Done():
 		t.Fatal(restartCtx.Err())
@@ -111,10 +111,10 @@ func TestDASer_Restart(t *testing.T) {
 	require.NoError(t, err)
 
 	// load checkpoint and ensure it's at network head
-	checkpoint, err := daser.sampler.store.load(ctx)
+	checkpoint, err := daser.cstore.load(ctx)
 	require.NoError(t, err)
 	// ensure checkpoint is stored at 45
-	assert.EqualValues(t, 60, checkpoint.SampledBefore-1)
+	assert.EqualValues(t, 60, checkpoint.SampleFrom-1)
 }
 
 func TestDASer_stopsAfter_BEFP(t *testing.T) {
@@ -155,7 +155,7 @@ func TestDASer_stopsAfter_BEFP(t *testing.T) {
 	case res := <-resultCh:
 		require.NoError(t, res)
 	}
-	// wait for manager to finish catchup
+	// wait for manager to indicateDone catchup
 	require.True(t, daser.running == 0)
 }
 

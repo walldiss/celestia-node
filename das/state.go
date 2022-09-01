@@ -12,9 +12,9 @@ type coordinatorState struct {
 	inProgress map[int]func() workerState // keeps track of running workers
 	failed     map[uint64]int             // stores heights of failed headers with amount of attempt as value
 
-	nextJobID int
-	next      uint64 // all headers before next were sent to workers
-	maxKnown  uint64 // max known header height
+	nextJobID   int
+	next        uint64 // all headers before next were sent to workers
+	networkHead uint64
 
 	catchUpDone   bool          // indicates if all headers are sampled
 	catchUpDoneCh chan struct{} // blocks until all headers are sampled
@@ -25,8 +25,8 @@ func initCoordinatorState(samplingRangeSize uint64, c checkpoint) coordinatorSta
 		rangeSize:     samplingRangeSize,
 		inProgress:    make(map[int]func() workerState),
 		failed:        c.Failed,
-		next:          c.SampledBefore,
-		maxKnown:      c.MaxKnown,
+		next:          c.SampleFrom,
+		networkHead:   c.NetworkHead,
 		catchUpDoneCh: make(chan struct{}),
 	}
 
@@ -68,35 +68,35 @@ func (s *coordinatorState) handleResult(res result) {
 	s.checkDone()
 }
 
-func (s *coordinatorState) updateMaxKnown(last uint64) {
+func (s *coordinatorState) updateHead(last uint64) {
 	// seen this header before
-	if last <= s.maxKnown {
-		log.Warnf("received head height: %v, which is lower or the same as previously known: %v", last, s.maxKnown)
+	if last <= s.networkHead {
+		log.Warnf("received head height: %v, which is lower or the same as previously known: %v", last, s.networkHead)
 		return
 	}
 
-	if s.maxKnown == 1 {
-		s.maxKnown = last
+	if s.networkHead == 1 {
+		s.networkHead = last
 		log.Infow("found first header, starting sampling")
 		return
 	}
 
 	// add most recent headers into priority queue
-	from := s.maxKnown + 1
+	from := s.networkHead + 1
 	for from <= last && len(s.priority) < priorityCap {
 		s.priority = append(s.priority, s.newJob(from, last, true))
 		from += s.rangeSize
 	}
 
-	log.Debugw("added recent headers to DASer priority queue", "from_height", s.maxKnown, "to_height", last)
-	s.maxKnown = last
+	log.Debugw("added recent headers to DASer priority queue", "from_height", s.networkHead, "to_height", last)
+	s.networkHead = last
 	s.checkDone()
 }
 
 // nextJob will return header height to be processed and done flog if there is none
 func (s *coordinatorState) nextJob() (next job, found bool) {
 	// all headers were sent to workers.
-	if s.next > s.maxKnown {
+	if s.next > s.networkHead {
 		return job{}, false
 	}
 
@@ -105,11 +105,11 @@ func (s *coordinatorState) nextJob() (next job, found bool) {
 		return next, found
 	}
 
-	j := s.newJob(s.next, s.maxKnown, false)
+	j := s.newJob(s.next, s.networkHead, false)
 
 	s.next += s.rangeSize
-	if s.next > s.maxKnown {
-		s.next = s.maxKnown + 1
+	if s.next > s.networkHead {
+		s.next = s.networkHead + 1
 	}
 
 	return j, true
@@ -155,9 +155,10 @@ func (s *coordinatorState) newJob(from, max uint64, fromPriority bool) job {
 	}
 }
 
-func (s *coordinatorState) stats() SamplingStats {
+// unsafeStats collects coordinator stats without any sync guarantees
+func (s *coordinatorState) unsafeStats() SamplingStats {
 	workers := make([]WorkerStats, 0, len(s.inProgress))
-	sampledBefore := s.next
+	headOfSampledChain := s.next
 	failed := make(map[uint64]int)
 
 	// gather worker SamplingStats
@@ -176,37 +177,37 @@ func (s *coordinatorState) stats() SamplingStats {
 
 		for _, h := range wstats.failed {
 			failed[h]++
-			if h < sampledBefore {
-				sampledBefore = h
+			if h < headOfSampledChain {
+				headOfSampledChain = h
 			}
 		}
 
-		if wstats.Curr < sampledBefore {
-			sampledBefore = wstats.Curr
+		if wstats.Curr < headOfSampledChain {
+			headOfSampledChain = wstats.Curr
 		}
 	}
 
-	// set sampledBefore to minimum failed - 1
+	// set headOfSampledChain to minimum failed - 1
 	for h, count := range s.failed {
 		failed[h] += count
-		if h < sampledBefore {
-			sampledBefore = h
+		if h < headOfSampledChain {
+			headOfSampledChain = h
 		}
 	}
 
 	return SamplingStats{
-		SampledBefore: sampledBefore,
-		MaxKnown:      s.maxKnown,
-		Failed:        failed,
-		Workers:       workers,
-		Concurrency:   len(workers),
-		CatchUpDone:   s.catchUpDone,
-		IsRunning:     len(workers) > 0 || s.catchUpDone,
+		HeadOfSampledChain: headOfSampledChain - 1,
+		NetworkHead:        s.networkHead,
+		Failed:             failed,
+		Workers:            workers,
+		Concurrency:        len(workers),
+		CatchUpDone:        s.catchUpDone,
+		IsRunning:          len(workers) > 0 || s.catchUpDone,
 	}
 }
 
 func (s *coordinatorState) checkDone() {
-	if len(s.inProgress) == 0 && s.next > s.maxKnown {
+	if len(s.inProgress) == 0 && s.next > s.networkHead {
 		if !s.catchUpDone {
 			close(s.catchUpDoneCh)
 			s.catchUpDone = true
@@ -220,7 +221,7 @@ func (s *coordinatorState) checkDone() {
 	}
 }
 
-// waitCatchUp waits for sampling process to finish catchup
+// waitCatchUp waits for sampling process to indicateDone catchup
 func (s *coordinatorState) waitCatchUp(ctx context.Context) error {
 	select {
 	case <-s.catchUpDoneCh:

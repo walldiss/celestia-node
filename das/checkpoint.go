@@ -1,13 +1,13 @@
 package das
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 )
 
 type checkpoint struct {
-	SampledBefore uint64 `json:"sampled_before"`
-	MaxKnown      uint64 `json:"max_known"`
+	SampleFrom  uint64 `json:"sample_from"`
+	NetworkHead uint64 `json:"network_head"`
 	// Failed will be prioritized on restart
 	Failed  map[uint64]int     `json:"failed,omitempty"`
 	Workers []workerCheckpoint `json:"workers,omitempty"`
@@ -28,28 +28,25 @@ func newCheckpoint(stats SamplingStats) checkpoint {
 		})
 	}
 	return checkpoint{
-		SampledBefore: stats.SampledBefore,
-		MaxKnown:      stats.MaxKnown,
-		Failed:        stats.Failed,
-		Workers:       workers,
+		SampleFrom:  stats.HeadOfSampledChain + 1,
+		NetworkHead: stats.NetworkHead,
+		Failed:      stats.Failed,
+		Workers:     workers,
 	}
 }
 
 func (c checkpoint) String() string {
-	buf := bytes.Buffer{}
-	buf.WriteString(fmt.Sprintf(
-		"SampledBefore: %v, MaxKnown: %v",
-		c.SampledBefore, c.MaxKnown))
+	buf := strings.Builder{}
+	buf.WriteString(fmt.Sprintf("SampleFrom: %v, NetworkHead: %v",
+		c.SampleFrom, c.NetworkHead))
+
+	if len(c.Workers) > 0 {
+		buf.WriteString(fmt.Sprintf(", Workers: %v", len(c.Workers)))
+	}
 
 	if len(c.Failed) > 0 {
 		buf.WriteString(fmt.Sprintf("\nFailed: %v", c.Failed))
 	}
 
-	if len(c.Workers) > 0 {
-		buf.WriteString("\nWorkers: ")
-	}
-	for _, w := range c.Workers {
-		buf.WriteString(fmt.Sprintf("\n from: %v, to: %v", w.From, w.To))
-	}
 	return buf.String()
 }

@@ -17,7 +17,7 @@ func newDone(name string) done {
 	}
 }
 
-func (sm *done) Done() {
+func (sm *done) indicateDone() {
 	close(sm.finished)
 }
 

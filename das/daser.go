@@ -40,11 +40,14 @@ type DASer struct {
 	bcast  fraud.Broadcaster
 	hsub   header.Subscriber // listens for new headers in the network
 	getter header.Getter     // retrieves past headers
+	cstore store
 
 	sampler       *samplingCoordinator
 	intervalStore backgroundStore
 	subscriber    subscriber
 
+	counter        int32
+	prev           []int32
 	cancel         context.CancelFunc
 	subscriberDone chan struct{}
 	running        int32
@@ -66,12 +69,12 @@ func NewDASer(
 		bcast:          bcast,
 		hsub:           hsub,
 		getter:         getter,
+		cstore:         wrapCheckpointStore(dstore),
 		subscriberDone: make(chan struct{}),
 	}
 
-	cstore := wrapCheckpointStore(dstore)
-	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, d.sample, cstore)
-	d.intervalStore = newBackgroundStore(cstore, d.sampler.getCheckpoint)
+	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, d.sample)
+	d.intervalStore = newBackgroundStore()
 	d.subscriber = newSubscriber()
 
 	return d
@@ -89,20 +92,22 @@ func (d *DASer) Start(ctx context.Context) error {
 	}
 
 	// load latest DASed checkpoint
-	cp, err := d.sampler.store.load(ctx)
+	cp, err := d.cstore.load(ctx)
 	if err != nil {
 		log.Warnw("checkpoint not found, initializing with height 1")
 
 		cp = checkpoint{
-			SampledBefore: 1,
-			MaxKnown:      1,
+			SampleFrom:  1,
+			NetworkHead: 1,
 		}
 
+		// attempt to get head info. No need to handle error, later DASer
+		// will be able to find new head from subscriber after it is started
 		if h, err := d.getter.Head(ctx); err == nil {
-			cp.MaxKnown = uint64(h.Height)
+			cp.SampleFrom = uint64(h.Height)
 		}
 	}
-	log.Info("starting DASer from checkpoint:\n", cp.String())
+	log.Info("starting DASer from checkpoint: ", cp.String())
 
 	d.sampler.state = initCoordinatorState(samplingRange, cp)
 
@@ -122,12 +127,27 @@ func (d *DASer) Stop(ctx context.Context) error {
 		return nil
 	}
 
-	d.cancel()
-	if err := d.sampler.finished(ctx); err != nil {
+	cp, err := d.sampler.getCheckpoint(ctx)
+	if err != nil {
 		return fmt.Errorf("DASer force quit: %w", err)
 	}
-	if err := d.intervalStore.wait(ctx); err != nil {
+
+	if err = d.cstore.store(ctx, cp); err != nil {
 		return fmt.Errorf("DASer force quit: %w", err)
+	}
+
+	d.cancel()
+	if err = d.sampler.wait(ctx); err != nil {
+		return fmt.Errorf("DASer force quit: %w", err)
+	}
+
+	// save updated checkpoint after sampler is shut down
+	if err = d.cstore.store(ctx, newCheckpoint(d.sampler.state.unsafeStats())); err != nil {
+		log.Errorw("storing checkpoint to disk", "Err", err)
+	}
+
+	if err = d.intervalStore.wait(ctx); err != nil {
+		return fmt.Errorf("DASer force quit with err: %w", err)
 	}
 	return d.subscriber.wait(ctx)
 }
@@ -174,5 +194,5 @@ func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) erro
 }
 
 func (d *DASer) SamplingStats(ctx context.Context) (SamplingStats, error) {
-	return d.sampler.getStats(ctx)
+	return d.sampler.stats(ctx)
 }

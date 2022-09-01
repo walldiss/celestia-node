@@ -6,7 +6,7 @@ import (
 	"github.com/celestiaorg/celestia-node/header"
 )
 
-// subscriber subscribes for notifications about new headers in the network to keep
+// subscriber subscribes to notifications about new headers in the network to keep
 // sampling process up-to-date with current network state.
 type subscriber struct {
 	done
@@ -17,8 +17,8 @@ func newSubscriber() subscriber {
 }
 
 func (s *subscriber) run(ctx context.Context, sub header.Subscription, emit listenFn) {
+	defer s.indicateDone()
 	defer sub.Cancel()
-	defer s.Done()
 
 	for {
 		h, err := sub.NextHeader(ctx)

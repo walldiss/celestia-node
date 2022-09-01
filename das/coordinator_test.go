@@ -8,9 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-datastore"
-	ds_sync "github.com/ipfs/go-datastore/sync"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,13 +22,12 @@ func TestCoordinator(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
 		sampler := newMockSampler(sampleBefore, maxKnown)
-		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
+		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
 		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 		assert.Emptyf(t, coordinator.state.failed, "failed list should be empty")
 
@@ -45,17 +41,16 @@ func TestCoordinator(t *testing.T) {
 
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
-		assert.NoError(t, coordinator.finished(stopCtx))
-		equalCheckpoint(ctx, t, sampler.finalState(), store)
+		assert.NoError(t, coordinator.wait(stopCtx))
+		assert.Equal(t, sampler.finalState(), newCheckpoint(coordinator.state.unsafeStats()))
 	})
 
 	t.Run("discovered new headers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
 		sampler := newMockSampler(sampleBefore, maxKnown)
-		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
+		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
 		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
@@ -66,7 +61,7 @@ func TestCoordinator(t *testing.T) {
 			sampler.discover(ctx, maxKnown+uint64(i), coordinator.listen)
 		}
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 		assert.Emptyf(t, coordinator.state.failed, "failed list should be empty")
 
@@ -80,8 +75,8 @@ func TestCoordinator(t *testing.T) {
 
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
-		assert.NoError(t, coordinator.finished(stopCtx))
-		equalCheckpoint(ctx, t, sampler.finalState(), store)
+		assert.NoError(t, coordinator.wait(stopCtx))
+		assert.Equal(t, sampler.finalState(), newCheckpoint(coordinator.state.unsafeStats()))
 	})
 
 	t.Run("prioritize newly discovered over known", func(t *testing.T) {
@@ -92,11 +87,10 @@ func TestCoordinator(t *testing.T) {
 		concurrency := 1
 
 		sampler := newMockSampler(sampleFrom, maxKnown)
-		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		// lock worker before start, to not let it finish before discover
+		// lock worker before start, to not let it indicateDone before discover
 		lk := newLock(sampleFrom, sampleFrom)
 
 		// expect worker to prioritize newly discovered  (20 -> 10) and then old (0 -> 10)
@@ -109,7 +103,7 @@ func TestCoordinator(t *testing.T) {
 			lk.middleWare(
 				order.middleWare(
 					sampler.sample)),
-			store)
+		)
 		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
@@ -125,7 +119,7 @@ func TestCoordinator(t *testing.T) {
 		// unblock worker
 		lk.release(sampleFrom)
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 		assert.Emptyf(t, coordinator.state.failed, "failed list should be empty")
 
@@ -139,19 +133,18 @@ func TestCoordinator(t *testing.T) {
 
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
-		assert.NoError(t, coordinator.finished(stopCtx))
-		equalCheckpoint(ctx, t, sampler.finalState(), store)
+		assert.NoError(t, coordinator.wait(stopCtx))
+		assert.Equal(t, sampler.finalState(), newCheckpoint(coordinator.state.unsafeStats()))
 	})
 
 	t.Run("priority routine should not lock other workers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
 		sampler := newMockSampler(sampleBefore, maxKnown)
-		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		lk := newLock(sampleBefore, maxKnown) // lock all workers before start
 		coordinator := newSamplingCoordinator(concurrency,
-			lk.middleWare(sampler.sample), store)
+			lk.middleWare(sampler.sample))
 		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
@@ -167,7 +160,7 @@ func TestCoordinator(t *testing.T) {
 		// unblock workers to resume sampling
 		lk.releaseAll(discovered)
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		time.Sleep(50 * time.Millisecond)
 
 		// check that only last header is pending
@@ -176,7 +169,7 @@ func TestCoordinator(t *testing.T) {
 
 		lk.releaseAll()
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 		assert.Emptyf(t, coordinator.state.failed, "failed list is not empty")
 
@@ -190,8 +183,8 @@ func TestCoordinator(t *testing.T) {
 
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
-		assert.NoError(t, coordinator.finished(stopCtx))
-		equalCheckpoint(ctx, t, sampler.finalState(), store)
+		assert.NoError(t, coordinator.wait(stopCtx))
+		assert.Equal(t, sampler.finalState(), newCheckpoint(coordinator.state.unsafeStats()))
 	})
 
 	t.Run("failed should be stored", func(t *testing.T) {
@@ -200,21 +193,19 @@ func TestCoordinator(t *testing.T) {
 
 		bornToFail := []uint64{4, 8, 15, 16, 23, 42}
 		sampler := newMockSampler(sampleFrom, maxKnown, bornToFail...)
-		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
 
 		// set failed items in expectedState
 		expectedState := sampler.finalState()
-		expectedState.SampledBefore = bornToFail[0]
-		expectedState.Failed = make(map[uint64]int)
+		expectedState.SampleFrom = bornToFail[0]
 		for _, h := range bornToFail {
 			expectedState.Failed[h] = 1
 		}
 
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
+		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
 		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 
 		// check if all jobs were sampled successfully
@@ -227,8 +218,8 @@ func TestCoordinator(t *testing.T) {
 
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
-		assert.NoError(t, coordinator.finished(stopCtx))
-		equalCheckpoint(ctx, t, expectedState, store)
+		assert.NoError(t, coordinator.wait(stopCtx))
+		assert.Equal(t, expectedState, newCheckpoint(coordinator.state.unsafeStats()))
 	})
 
 	t.Run("failed should retry on restart", func(t *testing.T) {
@@ -242,16 +233,14 @@ func TestCoordinator(t *testing.T) {
 		sampler.checkpoint.Failed = failedLastRun
 
 		expectedState := sampler.checkpoint
-		expectedState.SampledBefore = failedAgain[0]
-		expectedState.Failed = map[uint64]int{16: 3}
+		expectedState.SampleFrom = failedAgain[0]
+		expectedState.Failed[16] = 3
 
-		store := wrapCheckpointStore(ds_sync.MutexWrap(datastore.NewMapDatastore()))
-
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample, store)
+		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
 		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
 		go coordinator.run(ctx)
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
 
 		// check if all jobs were sampled successfully
@@ -264,8 +253,8 @@ func TestCoordinator(t *testing.T) {
 
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
-		assert.NoError(t, coordinator.finished(stopCtx))
-		equalCheckpoint(ctx, t, expectedState, store)
+		assert.NoError(t, coordinator.wait(stopCtx))
+		assert.Equal(t, expectedState, newCheckpoint(coordinator.state.unsafeStats()))
 	})
 }
 
@@ -277,15 +266,14 @@ func BenchmarkCoordinator(b *testing.B) {
 	b.Run("bench run", func(b *testing.B) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		coordinator := newSamplingCoordinator(concurrency,
-			func(ctx context.Context, u uint64) error { return nil },
-			wrapCheckpointStore(datastore.NewNullDatastore()))
+			func(ctx context.Context, u uint64) error { return nil })
 		coordinator.state = initCoordinatorState(samplingRange, checkpoint{
-			SampledBefore: 1,
-			MaxKnown:      uint64(b.N),
+			SampleFrom:  1,
+			NetworkHead: uint64(b.N),
 		})
 		go coordinator.run(ctx)
 
-		// wait for coordinator to finish catchup
+		// wait for coordinator to indicateDone catchup
 		if err := coordinator.state.waitCatchUp(ctx); err != nil {
 			b.Error(err)
 		}
@@ -312,10 +300,10 @@ func newMockSampler(sampledBefore, sampleTo uint64, bornToFail ...uint64) mockSa
 	}
 	return mockSampler{
 		checkpoint: checkpoint{
-			SampledBefore: sampledBefore,
-			MaxKnown:      sampleTo,
-			Failed:        nil,
-			Workers:       nil,
+			SampleFrom:  sampledBefore,
+			NetworkHead: sampleTo,
+			Failed:      make(map[uint64]int),
+			Workers:     make([]workerCheckpoint, 0),
 		},
 		bornToFail: failMap,
 		done:       make(map[uint64]int),
@@ -331,12 +319,12 @@ func (m *mockSampler) sample(ctx context.Context, h uint64) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	if h > m.MaxKnown || h < m.SampledBefore {
-		return fmt.Errorf("header: %v out of range: %v-%v", h, m.SampledBefore, m.MaxKnown)
+	if h > m.NetworkHead || h < m.SampleFrom {
+		return fmt.Errorf("header: %v out of range: %v-%v", h, m.SampleFrom, m.NetworkHead)
 	}
 	m.done[h]++
 
-	if len(m.done) > int(m.MaxKnown-m.SampledBefore) && !m.finished {
+	if len(m.done) > int(m.NetworkHead-m.SampleFrom) && !m.finished {
 		m.finished = true
 		close(m.finishedCh)
 	}
@@ -364,7 +352,7 @@ func (m *mockSampler) finalState() checkpoint {
 	defer m.lock.Unlock()
 
 	finalState := m.checkpoint
-	finalState.SampledBefore = finalState.MaxKnown + 1
+	finalState.SampleFrom = finalState.NetworkHead + 1
 	return finalState
 }
 
@@ -372,8 +360,8 @@ func (m *mockSampler) discover(ctx context.Context, newHeight uint64, emit func(
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	if newHeight > m.checkpoint.MaxKnown {
-		m.checkpoint.MaxKnown = newHeight
+	if newHeight > m.checkpoint.NetworkHead {
+		m.checkpoint.NetworkHead = newHeight
 		if m.finished {
 			m.finishedCh = make(chan struct{})
 			m.finished = false
@@ -532,10 +520,4 @@ func (l *lock) middleWare(out sampleFn) sampleFn {
 			return ctx.Err()
 		}
 	}
-}
-
-func equalCheckpoint(ctx context.Context, t *testing.T, expected checkpoint, store *store) {
-	cp, err := store.load(ctx)
-	assert.NoError(t, err, err)
-	assert.Equal(t, expected, cp)
 }
