@@ -224,6 +224,7 @@ func (m *mockGetter) fillSubWithHeaders(
 }
 
 type mockGetter struct {
+	getterStab
 	doneCh chan struct{} // signals all stored headers have been retrieved
 
 	brokenHeight   int64
@@ -273,10 +274,36 @@ func (m *mockGetter) GetByHeight(_ context.Context, height uint64) (*header.Exte
 	return m.headers[int64(height)], nil
 }
 
-func (m *mockGetter) GetRangeByHeight(ctx context.Context, from, to uint64) ([]*header.ExtendedHeader, error) {
+type benchGetterStab struct {
+	getterStab
+	header *header.ExtendedHeader
+}
+
+func newBenchGetter() benchGetterStab {
+	return benchGetterStab{header: &header.ExtendedHeader{
+		DAH: &header.DataAvailabilityHeader{RowsRoots: make([][]byte, 0)}}}
+}
+
+func (m benchGetterStab) GetByHeight(_ context.Context, height uint64) (*header.ExtendedHeader, error) {
+	return m.header, nil
+}
+
+type getterStab struct{}
+
+func (m getterStab) Head(context.Context) (*header.ExtendedHeader, error) {
 	return nil, nil
 }
 
-func (m *mockGetter) Get(context.Context, tmbytes.HexBytes) (*header.ExtendedHeader, error) {
+func (m getterStab) GetByHeight(_ context.Context, height uint64) (*header.ExtendedHeader, error) {
+	return &header.ExtendedHeader{
+		RawHeader: header.RawHeader{Height: int64(height)},
+		DAH:       &header.DataAvailabilityHeader{RowsRoots: make([][]byte, 0)}}, nil
+}
+
+func (m getterStab) GetRangeByHeight(ctx context.Context, from, to uint64) ([]*header.ExtendedHeader, error) {
+	return nil, nil
+}
+
+func (m getterStab) Get(context.Context, tmbytes.HexBytes) (*header.ExtendedHeader, error) {
 	return nil, nil
 }

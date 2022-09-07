@@ -22,18 +22,22 @@ func Test_coordinatorStats(t *testing.T) {
 				inProgress: map[int]func() workerState{
 					1: func() workerState {
 						return workerState{
+							job: job{
+								From: 21,
+								To:   30,
+							},
 							Curr:   25,
-							From:   21,
-							To:     30,
 							failed: []uint64{22},
 							Err:    errors.New("22: failed"),
 						}
 					},
 					2: func() workerState {
 						return workerState{
+							job: job{
+								From: 11,
+								To:   20,
+							},
 							Curr:   15,
-							From:   11,
-							To:     20,
 							failed: []uint64{12, 13},
 							Err:    multierr.Append(errors.New("12: failed"), errors.New("13: failed")),
 						}
@@ -46,6 +50,7 @@ func Test_coordinatorStats(t *testing.T) {
 			},
 			SamplingStats{
 				HeadOfSampledChain: 11,
+				HeadOfCatchup:      30,
 				NetworkHead:        100,
 				Failed:             map[uint64]int{22: 2, 23: 1, 24: 2, 12: 1, 13: 1},
 				Workers: []WorkerStats{

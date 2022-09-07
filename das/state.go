@@ -20,32 +20,29 @@ type coordinatorState struct {
 	catchUpDoneCh chan struct{} // blocks until all headers are sampled
 }
 
-func initCoordinatorState(samplingRangeSize uint64, c checkpoint) coordinatorState {
-	st := coordinatorState{
+// initState initiates state for samplingCoordinator
+func initState(samplingRangeSize uint64) coordinatorState {
+	return coordinatorState{
 		rangeSize:     samplingRangeSize,
+		priority:      make([]job, 0),
 		inProgress:    make(map[int]func() workerState),
-		failed:        c.Failed,
-		next:          c.SampleFrom,
-		networkHead:   c.NetworkHead,
+		failed:        make(map[uint64]int),
+		nextJobID:     0,
+		next:          1,
+		networkHead:   1,
+		catchUpDone:   false,
 		catchUpDoneCh: make(chan struct{}),
 	}
+}
 
-	if st.failed == nil {
-		st.failed = make(map[uint64]int)
-	}
-
-	st.priority = make([]job, 0, len(c.Failed)+len(c.Workers))
+func (s *coordinatorState) resumeFromCheckpoint(c checkpoint) {
+	s.next = c.SampleFrom
+	s.networkHead = c.NetworkHead
 	// put failed into priority to retry them on restart
-	for h := range c.Failed {
-		st.priority = append(st.priority, st.newJob(h, h, true))
+	for h, count := range c.Failed {
+		s.failed[h] = count
+		s.priority = append(s.priority, s.newJob(h, h))
 	}
-
-	// put last inProgress into priority
-	for _, wk := range c.Workers {
-		st.priority = append(st.priority, st.newJob(wk.From, wk.To, true))
-	}
-
-	return st
 }
 
 func (s *coordinatorState) handleResult(res result) {
@@ -57,7 +54,7 @@ func (s *coordinatorState) handleResult(res result) {
 	}
 
 	// update coordinator failed counter
-	for h := res.from; h <= res.to; h++ {
+	for h := res.From; h <= res.To; h++ {
 		if failedFromWorker[h] {
 			// failed in worker, increase failed counter
 			s.failed[h]++
@@ -68,29 +65,30 @@ func (s *coordinatorState) handleResult(res result) {
 	s.checkDone()
 }
 
-func (s *coordinatorState) updateHead(last uint64) {
+func (s *coordinatorState) updateHead(last uint64) bool {
 	// seen this header before
 	if last <= s.networkHead {
 		log.Warnf("received head height: %v, which is lower or the same as previously known: %v", last, s.networkHead)
-		return
+		return false
 	}
 
 	if s.networkHead == 1 {
 		s.networkHead = last
 		log.Infow("found first header, starting sampling")
-		return
+		return true
 	}
 
 	// add most recent headers into priority queue
 	from := s.networkHead + 1
 	for from <= last && len(s.priority) < priorityCap {
-		s.priority = append(s.priority, s.newJob(from, last, true))
+		s.priority = append(s.priority, s.newJob(from, last))
 		from += s.rangeSize
 	}
 
 	log.Debugw("added recent headers to DASer priority queue", "from_height", s.networkHead, "to_height", last)
 	s.networkHead = last
 	s.checkDone()
+	return true
 }
 
 // nextJob will return header height to be processed and done flog if there is none
@@ -105,7 +103,7 @@ func (s *coordinatorState) nextJob() (next job, found bool) {
 		return next, found
 	}
 
-	j := s.newJob(s.next, s.networkHead, false)
+	j := s.newJob(s.next, s.networkHead)
 
 	s.next += s.rangeSize
 	if s.next > s.networkHead {
@@ -118,20 +116,13 @@ func (s *coordinatorState) nextJob() (next job, found bool) {
 func (s *coordinatorState) nextFromPriority() (job, bool) {
 	for len(s.priority) > 0 {
 		next := s.priority[len(s.priority)-1]
+		s.priority = s.priority[:len(s.priority)-1]
 
-		// skip job if already processed
-		if next.to <= s.next {
-			s.priority = s.priority[:len(s.priority)-1]
+		// skip the job, if it will be processed next without a priority
+		if next.From == s.next {
 			continue
 		}
 
-		// cut job if it is partially processed
-		if next.from <= s.next {
-			next.from = s.next
-			s.next = next.to + 1 // move next to last
-		}
-
-		s.priority = s.priority[:len(s.priority)-1]
 		return next, true
 	}
 	return job{}, false
@@ -141,17 +132,16 @@ func (s *coordinatorState) putInProgress(jobID int, getState func() workerState)
 	s.inProgress[jobID] = getState
 }
 
-func (s *coordinatorState) newJob(from, max uint64, fromPriority bool) job {
+func (s *coordinatorState) newJob(from, max uint64) job {
 	s.nextJobID++
 	to := from + s.rangeSize - 1
 	if to > max {
 		to = max
 	}
 	return job{
-		id:         s.nextJobID,
-		from:       from,
-		to:         to,
-		isPriority: fromPriority,
+		id:   s.nextJobID,
+		From: from,
+		To:   to,
 	}
 }
 
@@ -161,7 +151,7 @@ func (s *coordinatorState) unsafeStats() SamplingStats {
 	lowestFailedOrInProgress := s.next
 	failed := make(map[uint64]int)
 
-	// gather worker SamplingStats
+	// gather worker stats
 	for _, getStats := range s.inProgress {
 		wstats := getStats()
 		var errMsg string
@@ -197,6 +187,7 @@ func (s *coordinatorState) unsafeStats() SamplingStats {
 
 	return SamplingStats{
 		HeadOfSampledChain: lowestFailedOrInProgress - 1,
+		HeadOfCatchup:      s.next - 1,
 		NetworkHead:        s.networkHead,
 		Failed:             failed,
 		Workers:            workers,
@@ -207,7 +198,7 @@ func (s *coordinatorState) unsafeStats() SamplingStats {
 }
 
 func (s *coordinatorState) checkDone() {
-	if len(s.inProgress) == 0 && s.next > s.networkHead {
+	if len(s.inProgress) == 0 && len(s.priority) == 0 && s.next > s.networkHead {
 		if !s.catchUpDone {
 			close(s.catchUpDoneCh)
 			s.catchUpDone = true

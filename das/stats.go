@@ -6,7 +6,9 @@ package das
 // over past headers from the last sampled checkpoint.
 type SamplingStats struct {
 	// all headers before HeadOfSampledChain were successfully sampled
-	HeadOfSampledChain uint64 `json:"sampled_before_height"`
+	HeadOfSampledChain uint64 `json:"head_of_sampled_chain"`
+	// all headers before HeadOfCatchup were submitted to sampling workers
+	HeadOfCatchup uint64 `json:"head_of_catchup"`
 	// NetworkHead is the height of the most recent header in the network
 	NetworkHead uint64 `json:"network_head_height"`
 	// Failed contains all skipped header's heights with corresponding try count

@@ -22,7 +22,7 @@ var log = logging.Logger("das")
 const (
 	// samplingCoordinator will paginate headers into jobs with fixed size.
 	//  samplingRange is the maximum amount of headers processed in one job.
-	samplingRange = 64
+	samplingRange = 100
 
 	// defaultConcurrencyLimit defines maximum amount of sampling workers running in parallel.
 	defaultConcurrencyLimit = 16
@@ -46,15 +46,13 @@ type DASer struct {
 	intervalStore backgroundStore
 	subscriber    subscriber
 
-	counter        int32
-	prev           []int32
 	cancel         context.CancelFunc
 	subscriberDone chan struct{}
 	running        int32
 }
 
 type listenFn func(ctx context.Context, height uint64)
-type sampleFn func(context.Context, uint64) error
+type sampleFn func(context.Context, *header.ExtendedHeader) error
 
 // NewDASer creates a new DASer.
 func NewDASer(
@@ -73,7 +71,7 @@ func NewDASer(
 		subscriberDone: make(chan struct{}),
 	}
 
-	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, d.sample)
+	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, samplingRange, getter, d.sample)
 	d.intervalStore = newBackgroundStore()
 	d.subscriber = newSubscriber()
 
@@ -109,12 +107,10 @@ func (d *DASer) Start(ctx context.Context) error {
 	}
 	log.Info("starting DASer from checkpoint: ", cp.String())
 
-	d.sampler.state = initCoordinatorState(samplingRange, cp)
-
 	runCtx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 
-	go d.sampler.run(runCtx)
+	go d.sampler.run(runCtx, cp)
 	go d.subscriber.run(runCtx, sub, d.sampler.listen)
 	go d.intervalStore.run(runCtx, backgroundStoreInterval, d.cstore, d.sampler.getCheckpoint)
 
@@ -140,37 +136,17 @@ func (d *DASer) Stop(ctx context.Context) error {
 	if err = d.sampler.wait(ctx); err != nil {
 		return fmt.Errorf("DASer force quit: %w", err)
 	}
-
-	// save updated checkpoint after sampler is shut down
-	if err = d.cstore.store(ctx, newCheckpoint(d.sampler.state.unsafeStats())); err != nil {
-		log.Errorw("storing checkpoint to disk", "Err", err)
-	}
-
 	if err = d.intervalStore.wait(ctx); err != nil {
 		return fmt.Errorf("DASer force quit with err: %w", err)
 	}
 	return d.subscriber.wait(ctx)
 }
 
-func (d *DASer) sample(ctx context.Context, sampleHeight uint64) error {
-	h, err := d.getter.GetByHeight(ctx, sampleHeight)
-	if err != nil {
-		return fmt.Errorf("getting: %w", err)
-	}
-
-	if err = d.sampleHeader(ctx, h); err != nil {
-		return fmt.Errorf("sampling: %w", err)
-	}
-	return nil
-}
-
-func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) error {
-	startTime := time.Now()
-
+func (d *DASer) sample(ctx context.Context, h *header.ExtendedHeader) error {
 	err := d.da.SharesAvailable(ctx, h.DAH)
 	if err != nil {
 		if err == context.Canceled {
-			return nil
+			return err
 		}
 		var byzantineErr *ipld.ErrByzantine
 		if errors.As(err, &byzantineErr) {
@@ -180,15 +156,11 @@ func (d *DASer) sampleHeader(ctx context.Context, h *header.ExtendedHeader) erro
 				log.Errorw("fraud proof propagating failed", "Err", sendErr)
 			}
 		}
+
 		log.Errorw("sampling failed", "height", h.Height, "hash", h.Hash(),
 			"square width", len(h.DAH.RowsRoots), "data root", h.DAH.Hash(), "Err", err)
-		// report previous height as the last successfully sampled height
 		return err
 	}
-
-	sampleTime := time.Since(startTime)
-	log.Infow("sampled header", "height", h.Height, "hash", h.Hash(),
-		"square width", len(h.DAH.RowsRoots), "finished (s)", sampleTime.Seconds())
 
 	return nil
 }

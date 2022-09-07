@@ -9,7 +9,8 @@ type checkpoint struct {
 	SampleFrom  uint64 `json:"sample_from"`
 	NetworkHead uint64 `json:"network_head"`
 	// Failed will be prioritized on restart
-	Failed  map[uint64]int     `json:"failed,omitempty"`
+	Failed map[uint64]int `json:"failed,omitempty"`
+	// Workers will resume on restart from corresponding state
 	Workers []workerCheckpoint `json:"workers,omitempty"`
 }
 
@@ -28,7 +29,7 @@ func newCheckpoint(stats SamplingStats) checkpoint {
 		})
 	}
 	return checkpoint{
-		SampleFrom:  stats.HeadOfSampledChain + 1,
+		SampleFrom:  stats.HeadOfCatchup + 1,
 		NetworkHead: stats.NetworkHead,
 		Failed:      stats.Failed,
 		Workers:     workers,

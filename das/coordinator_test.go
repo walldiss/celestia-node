@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/celestiaorg/celestia-node/header"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,16 +18,15 @@ func TestCoordinator(t *testing.T) {
 	samplingRange := uint64(10)
 	maxKnown := uint64(500)
 	sampleBefore := uint64(1)
-	timeoutDelay := 5 * time.Second
+	timeoutDelay := 125 * time.Second
 
 	t.Run("test run", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
 		sampler := newMockSampler(sampleBefore, maxKnown)
 
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
-		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
-		go coordinator.run(ctx)
+		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, onceMiddleWare(sampler.sample))
+		go coordinator.run(ctx, sampler.checkpoint)
 
 		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
@@ -50,9 +51,8 @@ func TestCoordinator(t *testing.T) {
 
 		sampler := newMockSampler(sampleBefore, maxKnown)
 
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
-		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
-		go coordinator.run(ctx)
+		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, sampler.sample)
+		go coordinator.run(ctx, sampler.checkpoint)
 
 		time.Sleep(50 * time.Millisecond)
 		// discover new height
@@ -99,13 +99,12 @@ func TestCoordinator(t *testing.T) {
 		order.addInterval(samplingRange+1, toBeDiscovered)
 
 		// start coordinator
-		coordinator := newSamplingCoordinator(concurrency,
+		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{},
 			lk.middleWare(
 				order.middleWare(
 					sampler.sample)),
 		)
-		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
-		go coordinator.run(ctx)
+		go coordinator.run(ctx, sampler.checkpoint)
 
 		// wait for worker to pick up first job
 		time.Sleep(50 * time.Millisecond)
@@ -143,10 +142,9 @@ func TestCoordinator(t *testing.T) {
 		sampler := newMockSampler(sampleBefore, maxKnown)
 
 		lk := newLock(sampleBefore, maxKnown) // lock all workers before start
-		coordinator := newSamplingCoordinator(concurrency,
+		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{},
 			lk.middleWare(sampler.sample))
-		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
-		go coordinator.run(ctx)
+		go coordinator.run(ctx, sampler.checkpoint)
 
 		time.Sleep(50 * time.Millisecond)
 		// discover new height and lock it
@@ -194,16 +192,8 @@ func TestCoordinator(t *testing.T) {
 		bornToFail := []uint64{4, 8, 15, 16, 23, 42}
 		sampler := newMockSampler(sampleFrom, maxKnown, bornToFail...)
 
-		// set failed items in expectedState
-		expectedState := sampler.finalState()
-		expectedState.SampleFrom = bornToFail[0]
-		for _, h := range bornToFail {
-			expectedState.Failed[h] = 1
-		}
-
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
-		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
-		go coordinator.run(ctx)
+		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, onceMiddleWare(sampler.sample))
+		go coordinator.run(ctx, sampler.checkpoint)
 
 		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
@@ -219,26 +209,27 @@ func TestCoordinator(t *testing.T) {
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.wait(stopCtx))
+
+		// set failed items in expectedState
+		expectedState := sampler.finalState()
+		for _, h := range bornToFail {
+			expectedState.Failed[h] = 1
+		}
 		assert.Equal(t, expectedState, newCheckpoint(coordinator.state.unsafeStats()))
 	})
 
 	t.Run("failed should retry on restart", func(t *testing.T) {
-		sampleFrom := uint64(1)
+		sampleFrom := uint64(50)
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		failedLastRun := map[uint64]int{4: 1, 8: 2, 15: 1, 16: 1, 23: 1, 42: 1}
+		failedLastRun := map[uint64]int{4: 1, 8: 2, 15: 1, 16: 1, 23: 1, 42: 1, sampleFrom - 1: 1}
 		failedAgain := []uint64{16}
 
 		sampler := newMockSampler(sampleFrom, maxKnown, failedAgain...)
 		sampler.checkpoint.Failed = failedLastRun
 
-		expectedState := sampler.checkpoint
-		expectedState.SampleFrom = failedAgain[0]
-		expectedState.Failed[16] = 3
-
-		coordinator := newSamplingCoordinator(concurrency, sampler.sample)
-		coordinator.state = initCoordinatorState(samplingRange, sampler.checkpoint)
-		go coordinator.run(ctx)
+		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, onceMiddleWare(sampler.sample))
+		go coordinator.run(ctx, sampler.checkpoint)
 
 		// wait for coordinator to indicateDone catchup
 		assert.NoError(t, coordinator.state.waitCatchUp(ctx))
@@ -254,6 +245,12 @@ func TestCoordinator(t *testing.T) {
 		stopCtx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 		defer cancel()
 		assert.NoError(t, coordinator.wait(stopCtx))
+
+		expectedState := sampler.finalState()
+		expectedState.Failed = make(map[uint64]int)
+		for _, v := range failedAgain {
+			expectedState.Failed[v] = failedLastRun[v] + 1
+		}
 		assert.Equal(t, expectedState, newCheckpoint(coordinator.state.unsafeStats()))
 	})
 }
@@ -265,13 +262,12 @@ func BenchmarkCoordinator(b *testing.B) {
 
 	b.Run("bench run", func(b *testing.B) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
-		coordinator := newSamplingCoordinator(concurrency,
-			func(ctx context.Context, u uint64) error { return nil })
-		coordinator.state = initCoordinatorState(samplingRange, checkpoint{
+		coordinator := newSamplingCoordinator(concurrency, samplingRange, newBenchGetter(),
+			func(ctx context.Context, h *header.ExtendedHeader) error { return nil })
+		go coordinator.run(ctx, checkpoint{
 			SampleFrom:  1,
 			NetworkHead: uint64(b.N),
 		})
-		go coordinator.run(ctx)
 
 		// wait for coordinator to indicateDone catchup
 		if err := coordinator.state.waitCatchUp(ctx); err != nil {
@@ -311,7 +307,7 @@ func newMockSampler(sampledBefore, sampleTo uint64, bornToFail ...uint64) mockSa
 	}
 }
 
-func (m *mockSampler) sample(ctx context.Context, h uint64) error {
+func (m *mockSampler) sample(ctx context.Context, h *header.ExtendedHeader) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -319,18 +315,22 @@ func (m *mockSampler) sample(ctx context.Context, h uint64) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	if h > m.NetworkHead || h < m.SampleFrom {
-		return fmt.Errorf("header: %v out of range: %v-%v", h, m.SampleFrom, m.NetworkHead)
-	}
-	m.done[h]++
+	height := uint64(h.Height)
+	m.done[height]++
 
 	if len(m.done) > int(m.NetworkHead-m.SampleFrom) && !m.finished {
 		m.finished = true
 		close(m.finishedCh)
 	}
 
-	if m.bornToFail[h] {
+	if m.bornToFail[height] {
 		return errors.New("born to fail, sad life")
+	}
+
+	if height > m.NetworkHead || height < m.SampleFrom {
+		if m.Failed[height] == 0 {
+			return fmt.Errorf("header: %v out of range: %v-%v", h, m.SampleFrom, m.NetworkHead)
+		}
 	}
 	return nil
 }
@@ -432,12 +432,12 @@ func TestStack(t *testing.T) {
 }
 
 func (o *checkOrder) middleWare(out sampleFn) sampleFn {
-	return func(ctx context.Context, h uint64) error {
+	return func(ctx context.Context, h *header.ExtendedHeader) error {
 		o.lock.Lock()
 
 		if len(o.queue) > 0 {
 			// check last item in queue to be same as input
-			if o.queue[0] != h {
+			if o.queue[0] != uint64(h.Height) {
 				o.lock.Unlock()
 				return fmt.Errorf("expected height: %v,got: %v", o.queue[0], h)
 			}
@@ -505,9 +505,9 @@ func (l *lock) releaseAll(except ...uint64) {
 }
 
 func (l *lock) middleWare(out sampleFn) sampleFn {
-	return func(ctx context.Context, h uint64) error {
+	return func(ctx context.Context, h *header.ExtendedHeader) error {
 		l.m.Lock()
-		ch, blocked := l.blockList[h]
+		ch, blocked := l.blockList[uint64(h.Height)]
 		l.m.Unlock()
 		if !blocked {
 			return out(ctx, h)
@@ -519,5 +519,19 @@ func (l *lock) middleWare(out sampleFn) sampleFn {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+}
+
+func onceMiddleWare(out sampleFn) sampleFn {
+	db := make(map[int64]int)
+	lock := sync.Mutex{}
+	return func(ctx context.Context, h *header.ExtendedHeader) error {
+		lock.Lock()
+		defer lock.Unlock()
+		db[h.Height]++
+		if db[h.Height] > 1 {
+			return fmt.Errorf("header sampled second time: %v", h.Height)
+		}
+		return out(ctx, h)
 	}
 }
