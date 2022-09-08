@@ -145,7 +145,7 @@ func (s *coordinatorState) newJob(from, max uint64) job {
 	}
 }
 
-// unsafeStats collects coordinator stats without any sync guarantees
+// unsafeStats collects coordinator stats without thread-safety
 func (s *coordinatorState) unsafeStats() SamplingStats {
 	workers := make([]WorkerStats, 0, len(s.inProgress))
 	lowestFailedOrInProgress := s.next
