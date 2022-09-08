@@ -124,7 +124,9 @@ func (m *metrics) observeSample(ctx context.Context, h *header.ExtendedHeader, s
 	if m == nil {
 		return
 	}
-	m.sampleTime.Record(ctx, sampleTime.Seconds(), attribute.Bool("failed", err != nil))
+	m.sampleTime.Record(ctx, sampleTime.Seconds(),
+		attribute.Bool("failed", err != nil),
+		attribute.Int("header_width", len(h.DAH.RowsRoots)))
 	if err != nil {
 		m.failed.Add(ctx, 1)
 		return
