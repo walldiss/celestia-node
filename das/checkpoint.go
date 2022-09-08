@@ -2,7 +2,6 @@ package das
 
 import (
 	"fmt"
-	"strings"
 )
 
 type checkpoint struct {
@@ -10,7 +9,7 @@ type checkpoint struct {
 	NetworkHead uint64 `json:"network_head"`
 	// Failed will be prioritized on restart
 	Failed map[uint64]int `json:"failed,omitempty"`
-	// Workers will resume on restart from corresponding state
+	// Workers will resume on restart from previous state
 	Workers []workerCheckpoint `json:"workers,omitempty"`
 }
 
@@ -37,17 +36,15 @@ func newCheckpoint(stats SamplingStats) checkpoint {
 }
 
 func (c checkpoint) String() string {
-	buf := strings.Builder{}
-	buf.WriteString(fmt.Sprintf("SampleFrom: %v, NetworkHead: %v",
-		c.SampleFrom, c.NetworkHead))
+	str := fmt.Sprintf("SampleFrom: %v, NetworkHead: %v", c.SampleFrom, c.NetworkHead)
 
 	if len(c.Workers) > 0 {
-		buf.WriteString(fmt.Sprintf(", Workers: %v", len(c.Workers)))
+		str += fmt.Sprintf(", Workers: %v", len(c.Workers))
 	}
 
 	if len(c.Failed) > 0 {
-		buf.WriteString(fmt.Sprintf("\nFailed: %v", c.Failed))
+		str += fmt.Sprintf("\nFailed: %v", c.Failed)
 	}
 
-	return buf.String()
+	return str
 }

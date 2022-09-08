@@ -28,8 +28,8 @@ func initState(samplingRangeSize uint64) coordinatorState {
 		inProgress:    make(map[int]func() workerState),
 		failed:        make(map[uint64]int),
 		nextJobID:     0,
-		next:          1,
-		networkHead:   1,
+		next:          genesisHeight,
+		networkHead:   genesisHeight,
 		catchUpDone:   false,
 		catchUpDoneCh: make(chan struct{}),
 	}
@@ -72,7 +72,7 @@ func (s *coordinatorState) updateHead(last uint64) bool {
 		return false
 	}
 
-	if s.networkHead == 1 {
+	if s.networkHead == genesisHeight {
 		s.networkHead = last
 		log.Infow("found first header, starting sampling")
 		return true

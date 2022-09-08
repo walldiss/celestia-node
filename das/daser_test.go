@@ -43,7 +43,7 @@ func TestDASerLifecycle(t *testing.T) {
 		require.NoError(t, err)
 
 		// load checkpoint and ensure it's at network head
-		checkpoint, err := daser.cstore.load(ctx)
+		checkpoint, err := daser.store.load(ctx)
 		require.NoError(t, err)
 		// ensure checkpoint is stored at 30
 		assert.EqualValues(t, 30, checkpoint.SampleFrom-1)
@@ -111,7 +111,7 @@ func TestDASer_Restart(t *testing.T) {
 	require.NoError(t, err)
 
 	// load checkpoint and ensure it's at network head
-	checkpoint, err := daser.cstore.load(ctx)
+	checkpoint, err := daser.store.load(ctx)
 	require.NoError(t, err)
 	// ensure checkpoint is stored at 45
 	assert.EqualValues(t, 60, checkpoint.SampleFrom-1)
@@ -216,7 +216,7 @@ func (m *mockGetter) fillSubWithHeaders(
 		randHeader.Height = int64(i + 1)
 
 		sub.Headers[index] = randHeader
-		// also store to mock getter for duplicate sampling
+		// also checkpointStore to mock getter for duplicate sampling
 		m.headers[int64(i+1)] = randHeader
 
 		index++

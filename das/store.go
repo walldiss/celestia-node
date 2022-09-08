@@ -15,26 +15,23 @@ var (
 	checkpointKey = datastore.NewKey("checkpoint")
 )
 
-// The checkpoint store stores/loads the DASer's checkpoint to/from
+// The checkpointStore stores/loads the DASer's checkpoint to/from
 // disk using the checkpointKey. The checkpoint is stored as a struct
 // representation of the latest successfully DASed state.
-type store struct {
+type checkpointStore struct {
 	datastore.Datastore
-}
-
-// backgroundStore periodically saves current sampling state in case of DASer force quit before
-// being able to store state on exit
-type backgroundStore struct {
 	done
 }
 
-// wrapCheckpointStore wraps the given datastore.Datastore with the `das` prefix.
-func wrapCheckpointStore(ds datastore.Datastore) store {
-	return store{namespace.Wrap(ds, storePrefix)}
+// newCheckpointStore wraps the given datastore.Datastore with the `das` prefix.
+func newCheckpointStore(ds datastore.Datastore) checkpointStore {
+	return checkpointStore{
+		namespace.Wrap(ds, storePrefix),
+		newDone("checkpoint checkpointStore")}
 }
 
 // load the DAS checkpoint from disk and returns it.
-func (s *store) load(ctx context.Context) (checkpoint, error) {
+func (s *checkpointStore) load(ctx context.Context) (checkpoint, error) {
 	bs, err := s.Get(ctx, checkpointKey)
 	if err != nil {
 		return checkpoint{}, err
@@ -45,9 +42,9 @@ func (s *store) load(ctx context.Context) (checkpoint, error) {
 	return cp, err
 }
 
-// store stores the given DAS checkpoint to disk.
-func (s *store) store(ctx context.Context, cp checkpoint) error {
-	// store latest DASed checkpoint to disk here to ensure that if DASer is not yet
+// checkpointStore stores the given DAS checkpoint to disk.
+func (s *checkpointStore) store(ctx context.Context, cp checkpoint) error {
+	// checkpointStore latest DASed checkpoint to disk here to ensure that if DASer is not yet
 	// fully caught up to network head, it will resume DASing from this checkpoint
 	// up to current network head
 	bs, err := json.Marshal(cp)
@@ -63,21 +60,17 @@ func (s *store) store(ctx context.Context, cp checkpoint) error {
 	return nil
 }
 
-func newBackgroundStore() backgroundStore {
-	return backgroundStore{newDone("background store")}
-}
-
-// run launches backgroundStore routine. Could be disabled by passing storeInterval = 0
-func (bgs *backgroundStore) run(
+// runBackgroundStore periodically saves current sampling state in case of DASer force quit before
+// being able to store state on exit
+func (s *checkpointStore) runBackgroundStore(
 	ctx context.Context,
 	storeInterval time.Duration,
-	store store,
-	getStats func(ctx context.Context) (checkpoint, error)) {
-	defer bgs.indicateDone()
+	getCheckpoint func(ctx context.Context) (checkpoint, error)) {
+	defer s.indicateDone()
 
-	// backgroundStore could be disabled by setting storeInterval = 0
+	// runBackgroundStore could be disabled by setting storeInterval = 0
 	if storeInterval == 0 {
-		log.Info("DASer background store is disabled")
+		log.Info("DASer background checkpointStore is disabled")
 		return
 	}
 
@@ -86,20 +79,20 @@ func (bgs *backgroundStore) run(
 
 	var prev uint64
 	for {
-		// blocked by ticker to perform store only once in a period of time
+		// blocked by ticker to perform checkpointStore only once in a period of time
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
 			return
 		}
 
-		cp, err := getStats(ctx)
+		cp, err := getCheckpoint(ctx)
 		if err != nil {
-			log.Debug("DASer coordinator stats are unavailable")
+			log.Debug("DASer coordinator checkpoint is unavailable")
 			continue
 		}
 		if cp.SampleFrom > prev {
-			if err = store.store(ctx, cp); err != nil {
+			if err = s.store(ctx, cp); err != nil {
 				log.Errorw("storing checkpoint to disk", "Err", err)
 			}
 			prev = cp.SampleFrom

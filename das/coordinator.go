@@ -20,7 +20,7 @@ type samplingCoordinator struct {
 	// updHeadCh signals to update network head header height
 	updHeadCh chan uint64
 	// waitCh signals to block coordinator for external access to state
-	waitCh chan func()
+	waitCh chan *sync.WaitGroup
 
 	workersWg sync.WaitGroup
 	done
@@ -44,7 +44,7 @@ func newSamplingCoordinator(
 		state:            initState(samplingRange),
 		resultCh:         make(chan result),
 		updHeadCh:        make(chan uint64),
-		waitCh:           make(chan func()),
+		waitCh:           make(chan *sync.WaitGroup),
 		done:             newDone("sampling coordinator"),
 	}
 }
@@ -70,8 +70,8 @@ func (sc *samplingCoordinator) run(ctx context.Context, cp checkpoint) {
 			sc.state.updateHead(max)
 		case res := <-sc.resultCh:
 			sc.state.handleResult(res)
-		case wait := <-sc.waitCh:
-			wait()
+		case wg := <-sc.waitCh:
+			wg.Wait()
 		case <-ctx.Done():
 			sc.workersWg.Wait()
 			sc.indicateDone()
@@ -108,7 +108,7 @@ func (sc *samplingCoordinator) stats(ctx context.Context) (SamplingStats, error)
 	defer wg.Done()
 
 	select {
-	case sc.waitCh <- wg.Wait:
+	case sc.waitCh <- &wg:
 	case <-ctx.Done():
 		return SamplingStats{}, ctx.Err()
 	}

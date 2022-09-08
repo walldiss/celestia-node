@@ -7,12 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/celestiaorg/celestia-node/ipld"
+
 	"github.com/ipfs/go-datastore"
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/celestiaorg/celestia-node/fraud"
 	"github.com/celestiaorg/celestia-node/header"
-	"github.com/celestiaorg/celestia-node/ipld"
 	"github.com/celestiaorg/celestia-node/service/share"
 )
 
@@ -27,11 +28,14 @@ const (
 	// defaultConcurrencyLimit defines maximum amount of sampling workers running in parallel.
 	defaultConcurrencyLimit = 16
 
-	// backgroundStoreInterval is the period of time for background store to perform a checkpoint backup.
+	// backgroundStoreInterval is the period of time for background checkpointStore to perform a checkpoint backup.
 	backgroundStoreInterval = 10 * time.Minute
 
 	// priorityCap defines size limit of priority queue
 	priorityCap = defaultConcurrencyLimit * 4
+
+	// genesisHeight is the height sampling will start from
+	genesisHeight = 1
 )
 
 // DASer continuously validates availability of data committed to headers.
@@ -40,11 +44,10 @@ type DASer struct {
 	bcast  fraud.Broadcaster
 	hsub   header.Subscriber // listens for new headers in the network
 	getter header.Getter     // retrieves past headers
-	cstore store
 
-	sampler       *samplingCoordinator
-	intervalStore backgroundStore
-	subscriber    subscriber
+	sampler    *samplingCoordinator
+	store      checkpointStore
+	subscriber subscriber
 
 	cancel         context.CancelFunc
 	subscriberDone chan struct{}
@@ -67,13 +70,11 @@ func NewDASer(
 		bcast:          bcast,
 		hsub:           hsub,
 		getter:         getter,
-		cstore:         wrapCheckpointStore(dstore),
+		store:          newCheckpointStore(dstore),
+		subscriber:     newSubscriber(),
 		subscriberDone: make(chan struct{}),
 	}
-
 	d.sampler = newSamplingCoordinator(defaultConcurrencyLimit, samplingRange, getter, d.sample)
-	d.intervalStore = newBackgroundStore()
-	d.subscriber = newSubscriber()
 
 	return d
 }
@@ -90,13 +91,13 @@ func (d *DASer) Start(ctx context.Context) error {
 	}
 
 	// load latest DASed checkpoint
-	cp, err := d.cstore.load(ctx)
+	cp, err := d.store.load(ctx)
 	if err != nil {
 		log.Warnw("checkpoint not found, initializing with height 1")
 
 		cp = checkpoint{
-			SampleFrom:  1,
-			NetworkHead: 1,
+			SampleFrom:  genesisHeight,
+			NetworkHead: genesisHeight,
 		}
 
 		// attempt to get head info. No need to handle error, later DASer
@@ -112,7 +113,7 @@ func (d *DASer) Start(ctx context.Context) error {
 
 	go d.sampler.run(runCtx, cp)
 	go d.subscriber.run(runCtx, sub, d.sampler.listen)
-	go d.intervalStore.run(runCtx, backgroundStoreInterval, d.cstore, d.sampler.getCheckpoint)
+	go d.store.runBackgroundStore(runCtx, backgroundStoreInterval, d.sampler.getCheckpoint)
 
 	return nil
 }
@@ -123,20 +124,27 @@ func (d *DASer) Stop(ctx context.Context) error {
 		return nil
 	}
 
+	// try to store checkpoint without waiting for coordinator and workers to stop
 	cp, err := d.sampler.getCheckpoint(ctx)
 	if err != nil {
-		return fmt.Errorf("DASer force quit: %w", err)
+		log.Error("DASer coordinator checkpoint is unavailable")
 	}
 
-	if err = d.cstore.store(ctx, cp); err != nil {
-		return fmt.Errorf("DASer force quit: %w", err)
+	if err = d.store.store(ctx, cp); err != nil {
+		log.Errorw("storing checkpoint to disk", "Err", err)
 	}
 
 	d.cancel()
 	if err = d.sampler.wait(ctx); err != nil {
 		return fmt.Errorf("DASer force quit: %w", err)
 	}
-	if err = d.intervalStore.wait(ctx); err != nil {
+
+	// save updated checkpoint after sampler and all workers are shut down
+	if err = d.store.store(ctx, newCheckpoint(d.sampler.state.unsafeStats())); err != nil {
+		log.Errorw("storing checkpoint to disk", "Err", err)
+	}
+
+	if err = d.store.wait(ctx); err != nil {
 		return fmt.Errorf("DASer force quit with err: %w", err)
 	}
 	return d.subscriber.wait(ctx)

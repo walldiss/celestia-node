@@ -16,14 +16,14 @@ import (
 func TestCoordinator(t *testing.T) {
 	concurrency := 10
 	samplingRange := uint64(10)
-	maxKnown := uint64(500)
-	sampleBefore := uint64(1)
+	networkHead := uint64(500)
+	sampleFrom := uint64(genesisHeight)
 	timeoutDelay := 125 * time.Second
 
 	t.Run("test run", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		sampler := newMockSampler(sampleBefore, maxKnown)
+		sampler := newMockSampler(sampleFrom, networkHead)
 
 		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, onceMiddleWare(sampler.sample))
 		go coordinator.run(ctx, sampler.checkpoint)
@@ -49,7 +49,7 @@ func TestCoordinator(t *testing.T) {
 	t.Run("discovered new headers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		sampler := newMockSampler(sampleBefore, maxKnown)
+		sampler := newMockSampler(sampleFrom, networkHead)
 
 		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, sampler.sample)
 		go coordinator.run(ctx, sampler.checkpoint)
@@ -58,7 +58,7 @@ func TestCoordinator(t *testing.T) {
 		// discover new height
 		for i := 0; i < 200; i++ {
 			// mess the order by running in go-routine
-			sampler.discover(ctx, maxKnown+uint64(i), coordinator.listen)
+			sampler.discover(ctx, networkHead+uint64(i), coordinator.listen)
 		}
 
 		// wait for coordinator to indicateDone catchup
@@ -81,12 +81,12 @@ func TestCoordinator(t *testing.T) {
 
 	t.Run("prioritize newly discovered over known", func(t *testing.T) {
 		sampleFrom := uint64(1)
-		maxKnown := uint64(10)
+		networkHead := uint64(10)
 		toBeDiscovered := uint64(20)
 		samplingRange := uint64(4)
 		concurrency := 1
 
-		sampler := newMockSampler(sampleFrom, maxKnown)
+		sampler := newMockSampler(sampleFrom, networkHead)
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
@@ -95,7 +95,7 @@ func TestCoordinator(t *testing.T) {
 
 		// expect worker to prioritize newly discovered  (20 -> 10) and then old (0 -> 10)
 		order := newCheckOrder().addInterval(sampleFrom, samplingRange) // worker will pick up first job before discovery
-		order.addStack(maxKnown+1, toBeDiscovered, samplingRange)
+		order.addStack(networkHead+1, toBeDiscovered, samplingRange)
 		order.addInterval(samplingRange+1, toBeDiscovered)
 
 		// start coordinator
@@ -139,16 +139,16 @@ func TestCoordinator(t *testing.T) {
 	t.Run("priority routine should not lock other workers", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
-		sampler := newMockSampler(sampleBefore, maxKnown)
+		sampler := newMockSampler(sampleFrom, networkHead)
 
-		lk := newLock(sampleBefore, maxKnown) // lock all workers before start
+		lk := newLock(sampleFrom, networkHead) // lock all workers before start
 		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{},
 			lk.middleWare(sampler.sample))
 		go coordinator.run(ctx, sampler.checkpoint)
 
 		time.Sleep(50 * time.Millisecond)
 		// discover new height and lock it
-		discovered := maxKnown + 1000
+		discovered := networkHead + 1000
 		lk.add(discovered)
 		sampler.discover(ctx, discovered, coordinator.listen)
 
@@ -162,7 +162,7 @@ func TestCoordinator(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		// check that only last header is pending
-		assert.EqualValues(t, int(discovered-sampleBefore), sampler.doneAmount())
+		assert.EqualValues(t, int(discovered-sampleFrom), sampler.doneAmount())
 		assert.False(t, sampler.heightIsDone(discovered))
 
 		lk.releaseAll()
@@ -190,7 +190,7 @@ func TestCoordinator(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeoutDelay)
 
 		bornToFail := []uint64{4, 8, 15, 16, 23, 42}
-		sampler := newMockSampler(sampleFrom, maxKnown, bornToFail...)
+		sampler := newMockSampler(sampleFrom, networkHead, bornToFail...)
 
 		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, onceMiddleWare(sampler.sample))
 		go coordinator.run(ctx, sampler.checkpoint)
@@ -225,7 +225,7 @@ func TestCoordinator(t *testing.T) {
 		failedLastRun := map[uint64]int{4: 1, 8: 2, 15: 1, 16: 1, 23: 1, 42: 1, sampleFrom - 1: 1}
 		failedAgain := []uint64{16}
 
-		sampler := newMockSampler(sampleFrom, maxKnown, failedAgain...)
+		sampler := newMockSampler(sampleFrom, networkHead, failedAgain...)
 		sampler.checkpoint.Failed = failedLastRun
 
 		coordinator := newSamplingCoordinator(concurrency, samplingRange, getterStab{}, onceMiddleWare(sampler.sample))
