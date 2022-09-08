@@ -91,7 +91,7 @@ func (s *coordinatorState) updateHead(last uint64) bool {
 	return true
 }
 
-// nextJob will return header height to be processed and done flog if there is none
+// nextJob will return header height to be processed and done flag if there is none
 func (s *coordinatorState) nextJob() (next job, found bool) {
 	// all headers were sent to workers.
 	if s.next > s.networkHead {
