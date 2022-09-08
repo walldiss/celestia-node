@@ -65,7 +65,8 @@ func (w *worker) run(
 	case resultCh <- result{
 		job:    w.state.job,
 		failed: w.state.failed,
-		err:    w.state.Err}:
+		err:    w.state.Err
+	}:
 	case <-ctx.Done():
 	}
 }
