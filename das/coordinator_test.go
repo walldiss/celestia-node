@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/celestiaorg/celestia-node/header"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/celestiaorg/celestia-node/header"
 )
 
 func TestCoordinator(t *testing.T) {

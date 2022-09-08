@@ -22,6 +22,7 @@ type samplingCoordinator struct {
 	// waitCh signals to block coordinator for external access to state
 	waitCh chan *sync.WaitGroup
 
+	metrics   *metrics
 	workersWg sync.WaitGroup
 	done
 }
@@ -67,7 +68,9 @@ func (sc *samplingCoordinator) run(ctx context.Context, cp checkpoint) {
 
 		select {
 		case max := <-sc.updHeadCh:
-			sc.state.updateHead(max)
+			if updated := sc.state.updateHead(max); updated {
+				sc.metrics.observeNewHead(ctx)
+			}
 		case res := <-sc.resultCh:
 			sc.state.handleResult(res)
 		case wg := <-sc.waitCh:
@@ -89,7 +92,7 @@ func (sc *samplingCoordinator) runWorker(ctx context.Context, j job) {
 	sc.workersWg.Add(1)
 	go func() {
 		defer sc.workersWg.Done()
-		w.run(ctx, sc.getter, sc.sampleFn, sc.resultCh)
+		w.run(ctx, sc.getter, sc.sampleFn, sc.metrics, sc.resultCh)
 	}()
 }
 
