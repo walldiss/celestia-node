@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/celestiaorg/celestia-node/ipld"
+	"github.com/celestiaorg/celestia-node/share"
 )
 
 // SubmitData submits given data in the block.
@@ -28,7 +28,7 @@ func (s *Swamp) FillBlocks(ctx context.Context, bsize, blocks int) error {
 	timer := time.NewTimer(btime)
 	defer timer.Stop()
 
-	data := make([]byte, bsize*ipld.ShareSize)
+	data := make([]byte, bsize*share.ShareSize)
 	for range make([]int, blocks) {
 		rand.Read(data) //nolint:gosec
 		if err := s.SubmitData(ctx, data); err != nil {
