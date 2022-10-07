@@ -28,7 +28,7 @@ func (s *Swamp) FillBlocks(ctx context.Context, bsize, blocks int) error {
 	timer := time.NewTimer(btime)
 	defer timer.Stop()
 
-	data := make([]byte, bsize*share.ShareSize)
+	data := make([]byte, bsize*share.Size)
 	for range make([]int, blocks) {
 		rand.Read(data) //nolint:gosec
 		if err := s.SubmitData(ctx, data); err != nil {
