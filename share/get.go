@@ -90,7 +90,7 @@ func GetProofsForShares(
 			if err != nil {
 				return nil, err
 			}
-			proofs[index] = NewShareWithProof(index, s.RawData()[1:], proof)
+			proofs[index] = NewShareWithProof(index, s.RawData(), proof)
 		}
 	}
 
@@ -101,5 +101,5 @@ func GetProofsForShares(
 func leafToShare(nd format.Node) Share {
 	// * First byte represents the type of the node, and is unrelated to the actual share data
 	// * Additional namespace is prepended so that parity data can be identified with a parity namespace, which we cut off
-	return nd.RawData()[1+NamespaceSize:] // TODO(@Wondertan): Rework NMT/IPLD plugin to avoid the type byte
+	return nd.RawData()[NamespaceSize:] // TODO(@Wondertan): Rework NMT/IPLD plugin to avoid the type byte
 }

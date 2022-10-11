@@ -25,16 +25,6 @@ func TestNamespaceHasherWrite(t *testing.T) {
 			innerSize,
 			innerSize,
 		},
-		{
-			"LeafAndType",
-			leafSize,
-			leafSize + typeSize,
-		},
-		{
-			"InnerAndType",
-			innerSize,
-			innerSize + typeSize,
-		},
 	}
 
 	for _, ts := range tt {

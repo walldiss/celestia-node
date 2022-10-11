@@ -50,12 +50,6 @@ func (n *namespaceHasher) Write(data []byte) (int, error) {
 		n.tp = nmt.NodePrefix
 	case leafNodeSize:
 		n.tp = nmt.LeafPrefix
-	case innerNodeSize + typeSize: // w/ additional type byte
-		n.tp = nmt.NodePrefix
-		data = data[typeSize:]
-	case leafNodeSize + typeSize: // w/ additional type byte
-		n.tp = nmt.LeafPrefix
-		data = data[typeSize:]
 	}
 
 	n.data = data
