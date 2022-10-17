@@ -35,14 +35,14 @@ func (n *NmtNodeAdder) Visit(hash []byte, children ...[]byte) {
 	if n.err != nil {
 		return // protect from further visits if there is an error
 	}
-	id := MustCidFromNamespacedSha256(hash)
+	id := MustCidFromNamespacedSha256(hash[8:])
 	switch len(children) {
 	case 1:
 		if n.leaves.Visit(id) {
-			n.err = n.add.Add(n.ctx, newNMTNode(id, children[0]))
+			n.err = n.add.Add(n.ctx, newNMTNode(id, children[0][NamespaceSize:]))
 		}
 	case 2:
-		n.err = n.add.Add(n.ctx, newNMTNode(id, append(children[0], children[1]...)))
+		n.err = n.add.Add(n.ctx, newNMTNode(id, append(children[0][NamespaceSize:], children[1][NamespaceSize:]...)))
 	default:
 		panic("expected a binary tree")
 	}

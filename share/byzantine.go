@@ -42,7 +42,7 @@ func NewErrByzantine(
 	sharesWithProof, err := GetProofsForShares(
 		ctx,
 		bGetter,
-		ipld.MustCidFromNamespacedSha256(root),
+		ipld.MustCidFromNamespacedSha256(root[8:]),
 		errByz.Shares,
 	)
 	if err != nil {

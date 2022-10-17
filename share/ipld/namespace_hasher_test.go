@@ -9,7 +9,7 @@ import (
 )
 
 func TestNamespaceHasherWrite(t *testing.T) {
-	leafSize := appconsts.ShareSize + appconsts.NamespaceSize
+	leafSize := appconsts.ShareSize
 	innerSize := nmtHashSize * 2
 	tt := []struct {
 		name         string

@@ -104,7 +104,7 @@ func (s *ShareService) GetSharesByNamespace(
 	rowRootCIDs := make([]cid.Cid, 0)
 	for _, row := range root.RowsRoots {
 		if !nID.Less(nmt.MinNamespace(row, nID.Size())) && nID.LessOrEqual(nmt.MaxNamespace(row, nID.Size())) {
-			rowRootCIDs = append(rowRootCIDs, ipld.MustCidFromNamespacedSha256(row))
+			rowRootCIDs = append(rowRootCIDs, ipld.MustCidFromNamespacedSha256(row[8:]))
 		}
 	}
 	if len(rowRootCIDs) == 0 {

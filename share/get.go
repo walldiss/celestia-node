@@ -24,7 +24,7 @@ func GetShare(
 		return nil, err
 	}
 
-	return leafToShare(nd), nil
+	return nd.RawData(), nil
 }
 
 // GetShares walks the tree of a given root and puts shares into the given 'put' func.
@@ -35,7 +35,7 @@ func GetShares(ctx context.Context, bGetter blockservice.BlockGetter, root cid.C
 	defer span.End()
 
 	putNode := func(i int, leaf format.Node) {
-		put(i, leafToShare(leaf))
+		put(i, leaf.RawData())
 	}
 	ipld.GetLeaves(ctx, bGetter, root, shares, putNode)
 }
@@ -61,7 +61,7 @@ func GetSharesByNamespace(
 	shares := make([]Share, len(leaves))
 	for i, leaf := range leaves {
 		if leaf != nil {
-			shares[i] = leafToShare(leaf)
+			shares[i] = leaf.RawData()
 		}
 	}
 
@@ -95,10 +95,4 @@ func GetProofsForShares(
 	}
 
 	return proofs, nil
-}
-
-// leafToShare converts an NMT leaf into a Share.
-func leafToShare(nd format.Node) Share {
-	// * Additional namespace is prepended so that parity data can be identified with a parity namespace, which we cut off
-	return nd.RawData()[NamespaceSize:]
 }

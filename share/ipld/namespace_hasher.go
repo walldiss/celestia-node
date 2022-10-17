@@ -7,7 +7,6 @@ import (
 	"github.com/minio/sha256-simd"
 	mhcore "github.com/multiformats/go-multihash/core"
 
-	"github.com/celestiaorg/celestia-app/pkg/appconsts"
 	"github.com/celestiaorg/nmt"
 )
 
@@ -41,11 +40,11 @@ func (n *namespaceHasher) Write(data []byte) (int, error) {
 		return 0, fmt.Errorf("ipld: only one write to hasher is allowed")
 	}
 
-	ln, nln, hln := len(data), int(n.NamespaceLen), n.Hash.Size()
-	innerNodeSize, leafNodeSize := (nln*2+hln)*2, nln+appconsts.ShareSize
-	switch ln {
+	innerNodeSize := (int(n.NamespaceLen) + n.Hash.Size()) * 2
+	switch len(data) {
 	default:
-		return 0, fmt.Errorf("ipld: wrong sized data written to the hasher, len: %v", ln)
+		panic("AAAA")
+		return 0, fmt.Errorf("ipld: wrong sized data written to the hasher, len: %v, %v", len(data), innerNodeSize)
 	case innerNodeSize:
 		n.tp = nmt.NodePrefix
 	case leafNodeSize:
@@ -64,7 +63,7 @@ func (n *namespaceHasher) Sum([]byte) []byte {
 		return n.Hasher.HashLeaf(n.data)
 	}
 
-	flagLen := int(n.NamespaceLen * 2)
+	flagLen := int(n.NamespaceLen)
 	sha256Len := n.Hasher.Size()
 	return n.Hasher.HashNode(n.data[:flagLen+sha256Len], n.data[flagLen+sha256Len:])
 }

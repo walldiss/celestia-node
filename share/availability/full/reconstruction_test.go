@@ -14,6 +14,7 @@ import (
 	"github.com/celestiaorg/celestia-node/share/availability/light"
 	availability_test "github.com/celestiaorg/celestia-node/share/availability/test"
 	"github.com/celestiaorg/celestia-node/share/eds"
+	"github.com/pion/transport/test"
 )
 
 func init() {
@@ -173,6 +174,10 @@ func TestShareAvailable_DisconnectedFullNodes(t *testing.T) {
 	// └─┴─┤   ├─┴─┘
 	//    F└───┘F
 	//
+
+	// Check for leaking routines
+	report := test.CheckRoutines(t)
+	defer report()
 
 	// NOTE: Numbers are taken from the original 'Fraud and Data Availability Proofs' paper
 	light.DefaultSampleAmount = 20 // s

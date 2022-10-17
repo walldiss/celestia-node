@@ -36,13 +36,13 @@ const (
 	sha256Namespace8Flagged = 0x7701
 
 	// nmtHashSize is the size of a digest created by an NMT in bytes.
-	nmtHashSize = 2*appconsts.NamespaceSize + sha256.Size
+	nmtHashSize = appconsts.NamespaceSize + sha256.Size
 
 	// innerNodeSize is the size of data in inner nodes.
 	innerNodeSize = nmtHashSize * 2
 
 	// leafNodeSize is the size of data in leaf nodes.
-	leafNodeSize = NamespaceSize + appconsts.ShareSize
+	leafNodeSize = appconsts.ShareSize
 
 	// MaxSquareSize is currently the maximum size supported for unerasured data in rsmt2d.ExtendedDataSquare.
 	MaxSquareSize = appconsts.MaxSquareSize
@@ -151,10 +151,10 @@ func MustCidFromNamespacedSha256(hash []byte) cid.Cid {
 // It also adds randomization to evenly spread fetching from Rows and Columns.
 func Translate(dah *da.DataAvailabilityHeader, row, col int) (cid.Cid, int) {
 	if rand.Intn(2) == 0 { //nolint:gosec
-		return MustCidFromNamespacedSha256(dah.ColumnRoots[col]), row
+		return MustCidFromNamespacedSha256(dah.ColumnRoots[col][8:]), row
 	}
 
-	return MustCidFromNamespacedSha256(dah.RowsRoots[row]), col
+	return MustCidFromNamespacedSha256(dah.RowsRoots[row][8:]), col
 }
 
 // NamespacedSha256FromCID derives the Namespaced hash from the given CID.

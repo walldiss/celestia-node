@@ -66,7 +66,7 @@ func newQuadrants(dah *da.DataAvailabilityHeader) []*quadrant {
 		size, qsize := len(daRoots[source]), len(daRoots[source])/2
 		roots := make([]cid.Cid, size)
 		for i, root := range daRoots[source] {
-			roots[i] = ipld.MustCidFromNamespacedSha256(root)
+			roots[i] = ipld.MustCidFromNamespacedSha256(root[8:])
 		}
 
 		for i := range quadrants {
