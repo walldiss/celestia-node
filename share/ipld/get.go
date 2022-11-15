@@ -45,10 +45,12 @@ var pool = workerpool.New(NumWorkersLimit)
 // LeavesWithProofs contains data with corresponding Merkle Proof
 type LeavesWithProofs struct {
 	Leaves []ipld.Node
-	// Proofs contains nodes required for Leaves inclusion validation. Will be nil, if
-	// GetLeavesByNamespace was called with collectProofs = false option.
-	Proofs               [][]byte
-	ProofStart, ProofEnd int
+	// Proofs contains nodes hashes required for Leaves inclusion validation. Will be nil, if
+	// GetLeavesByNamespace was called with collectProofs == false option.
+	Proofs [][]byte
+	// LeavesStart, LeavesEnd are edge coordinates of fetched leaves in array of all leaves for given
+	// root
+	LeavesStart, LeavesEnd int
 }
 
 // GetLeaf fetches and returns the raw leaf.
@@ -262,10 +264,10 @@ func GetLeavesByNamespace(
 				}
 
 				return &LeavesWithProofs{
-					Leaves:     leaves[bounds.lowest : bounds.highest+1],
-					Proofs:     proofs,
-					ProofStart: int(bounds.lowest),
-					ProofEnd:   int(bounds.highest) + 1,
+					Leaves:      leaves[bounds.lowest : bounds.highest+1],
+					Proofs:      proofs,
+					LeavesStart: int(bounds.lowest),
+					LeavesEnd:   int(bounds.highest) + 1,
 				}, retrievalErr
 			}
 			pool.Submit(func() {

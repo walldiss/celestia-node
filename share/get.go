@@ -3,6 +3,8 @@ package share
 import (
 	"context"
 
+	"github.com/celestiaorg/nmt"
+
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
@@ -10,6 +12,16 @@ import (
 	"github.com/celestiaorg/celestia-node/share/ipld"
 	"github.com/celestiaorg/nmt/namespace"
 )
+
+// SharesWithProofs contains data with corresponding Merkle Proof
+type SharesWithProofs struct {
+	Root cid.Cid
+	// Share is a full data including namespace
+	Shares []Share
+	// Proof is a Merkle Proof of current share, will be nil if GetSharesByNamespace called with
+	// collectProofs == false
+	Proof *nmt.Proof
+}
 
 // GetShare fetches and returns the data for leaf `leafIndex` of root `rootCid`.
 func GetShare(
@@ -40,8 +52,8 @@ func GetShares(ctx context.Context, bGetter blockservice.BlockGetter, root cid.C
 	ipld.GetLeaves(ctx, bGetter, root, shares, putNode)
 }
 
-// GetSharesByNamespace walks the tree of a given root and returns its shares within the given
-// namespace.ID. If a share could not be retrieved, err is not nil, and the returned array
+// GetSharesByNamespace walks the tree of a given root and returns its shares within the
+// given namespace.ID. If a share could not be retrieved, err is not nil, and the returned array
 // contains nil shares in place of the shares it was unable to retrieve.
 func GetSharesByNamespace(
 	ctx context.Context,
@@ -49,23 +61,32 @@ func GetSharesByNamespace(
 	root cid.Cid,
 	nID namespace.ID,
 	maxShares int,
-) ([]Share, error) {
+	collectProofs bool,
+) (*SharesWithProofs, error) {
 	ctx, span := tracer.Start(ctx, "get-shares-by-namespace")
 	defer span.End()
 
-	nodes, err := ipld.GetLeavesByNamespace(ctx, bGetter, root, nID, maxShares, false)
-	if err != nil && nodes == nil {
+	nodes, err := ipld.GetLeavesByNamespace(ctx, bGetter, root, nID, maxShares, collectProofs)
+	if nodes == nil {
 		return nil, err
 	}
 
-	shares := make([]Share, 0, maxShares)
+	shares := make([]Share, 0, nodes.LeavesEnd-nodes.LeavesStart)
 	for _, leaf := range nodes.Leaves {
 		if leaf != nil {
 			shares = append(shares, leafToShare(leaf))
 		}
 	}
 
-	return shares, err
+	proof := new(nmt.Proof)
+	if collectProofs {
+		*proof = nmt.NewInclusionProof(nodes.LeavesStart, nodes.LeavesEnd, nodes.Proofs, true)
+	}
+	return &SharesWithProofs{
+		Root:   root,
+		Shares: shares,
+		Proof:  proof,
+	}, nil
 }
 
 // leafToShare converts an NMT leaf into a Share.

@@ -113,12 +113,12 @@ func (s *ShareService) GetSharesByNamespace(
 	}
 
 	errGroup, ctx := errgroup.WithContext(ctx)
-	shares := make([][]share.Share, len(rowRootCIDs))
+	shares := make([]*share.SharesWithProofs, len(rowRootCIDs))
 	for i, rootCID := range rowRootCIDs {
 		// shadow loop variables, to ensure correct values are captured
 		i, rootCID := i, rootCID
 		errGroup.Go(func() (err error) {
-			shares[i], err = share.GetSharesByNamespace(ctx, s.bServ, rootCID, nID, len(root.RowsRoots))
+			shares[i], err = share.GetSharesByNamespace(ctx, s.bServ, rootCID, nID, len(root.RowsRoots), false)
 			return
 		})
 	}
@@ -133,7 +133,7 @@ func (s *ShareService) GetSharesByNamespace(
 	// preallocation would make a 	difference
 	var out []share.Share
 	for i := 0; i < len(rowRootCIDs); i++ {
-		out = append(out, shares[i]...)
+		out = append(out, shares[i].Shares...)
 	}
 
 	return out, nil

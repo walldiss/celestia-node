@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package share.p2p.v1;
+
+message SharesWithProof {
+  repeated Row rows = 1;
+}
+
+message Row{
+  bytes root_cid = 1;
+  repeated bytes shares = 2;
+  MerkleProof proof = 3;
+}
+
+message MerkleProof {
+  int64 start     = 1;
+  int64 end       = 2;
+  repeated bytes nodes = 3;
+}

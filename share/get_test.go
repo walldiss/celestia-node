@@ -2,6 +2,7 @@ package share
 
 import (
 	"context"
+	"crypto/sha256"
 	"math"
 	"math/rand"
 	"strconv"
@@ -138,9 +139,9 @@ func removeRandShares(data [][]byte, d int) [][]byte {
 	return data
 }
 
-func TestGetSharesByNamespace(t *testing.T) {
+func TestGetSharessByNamespace(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 	bServ := mdutils.Bserv()
 
 	var tests = []struct {
@@ -148,16 +149,28 @@ func TestGetSharesByNamespace(t *testing.T) {
 	}{
 		{rawData: RandShares(t, 4)},
 		{rawData: RandShares(t, 16)},
+		{rawData: RandShares(t, 64)},
 	}
 
 	for i, tt := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			// choose random nID from rand shares
-			expected := tt.rawData[len(tt.rawData)/2]
+			rand.Seed(time.Now().UnixNano())
+			// choose random range in shares f
+			from := rand.Intn(len(tt.rawData) - 1)
+			to := rand.Intn(len(tt.rawData) - 1)
+
+			if to < from {
+				from, to = to, from
+			}
+
+			expected := tt.rawData[from]
 			nID := expected[:NamespaceSize]
 
 			// change rawData to contain several shares with same nID
-			tt.rawData[(len(tt.rawData)/2)+1] = expected
+			for i := from; i <= to; i++ {
+				tt.rawData[i] = expected
+			}
+
 			// put raw data in BlockService
 			eds, err := AddShares(ctx, tt.rawData, bServ)
 			require.NoError(t, err)
@@ -165,13 +178,30 @@ func TestGetSharesByNamespace(t *testing.T) {
 			var shares []Share
 			for _, row := range eds.RowRoots() {
 				rcid := ipld.MustCidFromNamespacedSha256(row)
-				rowShares, err := GetSharesByNamespace(ctx, bServ, rcid, nID, len(eds.RowRoots()))
+				rowShares, err := GetSharesByNamespace(ctx, bServ, rcid, nID, len(eds.RowRoots()), true)
 				require.NoError(t, err)
+				if rowShares != nil {
+					// append shares to check integrity later
+					shares = append(shares, rowShares.Shares...)
 
-				shares = append(shares, rowShares...)
+					// construct nodes from shares by prepending namespace
+					var leaves [][]byte
+					for _, sh := range rowShares.Shares {
+						leaves = append(leaves, append(sh[:NamespaceSize], sh...))
+					}
+
+					// validate proof
+					verified := rowShares.Proof.VerifyNamespace(
+						sha256.New(),
+						nID,
+						leaves,
+						ipld.NamespacedSha256FromCID(rcid))
+					require.True(t, verified)
+				}
 			}
 
-			assert.Equal(t, 2, len(shares))
+			// validate shares
+			assert.Equal(t, to-from+1, len(shares))
 			for _, share := range shares {
 				assert.Equal(t, expected, share)
 			}
