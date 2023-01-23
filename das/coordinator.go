@@ -2,7 +2,9 @@ package das
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/celestiaorg/celestia-node/header"
 )
@@ -59,6 +61,8 @@ func (sc *samplingCoordinator) run(ctx context.Context, cp checkpoint) {
 		sc.runWorker(ctx, sc.state.newJob(wk.From, wk.To))
 	}
 
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		for !sc.concurrencyLimitReached() {
 			next, found := sc.state.nextJob()
@@ -73,10 +77,17 @@ func (sc *samplingCoordinator) run(ctx context.Context, cp checkpoint) {
 			if sc.state.updateHead(head) {
 				sc.metrics.observeNewHead(ctx)
 			}
+			stats := sc.state.unsafeStats()
+			bs, _ := json.MarshalIndent(&stats, "", "  ")
+			log.Infof("STATS 2: %s", string(bs))
 		case res := <-sc.resultCh:
 			sc.state.handleResult(res)
 		case wg := <-sc.waitCh:
 			wg.Wait()
+		case <-ticker.C:
+			stats := sc.state.unsafeStats()
+			bs, _ := json.MarshalIndent(&stats, "", "  ")
+			log.Infof("STATS 2: %s", string(bs))
 		case <-ctx.Done():
 			sc.workersWg.Wait()
 			sc.indicateDone()
