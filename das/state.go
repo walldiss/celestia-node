@@ -92,6 +92,9 @@ func (s *coordinatorState) updateHead(newHead uint64) {
 }
 
 func (s *coordinatorState) newRecentJob(newHead uint64) job {
+	if s.next == newHead {
+		s.next++
+	}
 	s.nextJobID++
 	return job{
 		id:             s.nextJobID,
