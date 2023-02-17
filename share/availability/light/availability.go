@@ -56,7 +56,7 @@ func (la *ShareAvailability) SharesAvailable(ctx context.Context, dah *share.Roo
 			log.Debugw("fetching share", "root", dah.Hash(), "row", s.Row, "col", s.Col)
 			_, err := la.getter.GetShare(ctx, dah, s.Row, s.Col)
 			if err != nil {
-				log.Debugw("error fetching share", "root", dah.Hash(), "row", s.Row, "col", s.Col)
+				log.Debugw("error fetching share", "root", dah.Hash(), "row", s.Row, "col", s.Col, "err", err.Error())
 			}
 			// we don't really care about Share bodies at this point
 			// it also means we now saved the Share in local storage
