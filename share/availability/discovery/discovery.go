@@ -302,6 +302,9 @@ func (d *Discovery) findPeers(ctx context.Context) {
 				break
 			}
 		}
+
+		// give some time for connections to go through
+		time.Sleep(time.Second)
 	}
 
 	// we expect no errors
