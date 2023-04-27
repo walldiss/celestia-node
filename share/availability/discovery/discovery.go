@@ -274,15 +274,15 @@ func (d *Discovery) findPeers(ctx context.Context) {
 	log.Infow("below soft peer limit, discovering peers", "amount", d.set.Limit())
 
 	// we use errgroup as it obeys the context
-	wg, wgCtx := errgroup.WithContext(ctx)
+	wg, findCtx := errgroup.WithContext(ctx)
+	findCtx, findCancel := context.WithCancel(findCtx)
+	defer findCancel()
+
 	// limit to minimize chances of overreaching the limit
 	wg.SetLimit(d.set.Limit())
 
-	for d.set.Size() < d.set.Limit() && wgCtx.Err() == nil {
+	for d.set.Size() < d.set.Limit() && findCtx.Err() == nil {
 		log.Debugw("finding peers", "remaining", d.set.Limit()-d.set.Size())
-		findCtx, findCancel := context.WithCancel(wgCtx)
-		defer findCancel()
-
 		peers, err := d.disc.FindPeers(findCtx, topic)
 		if err != nil {
 			log.Warn(err)
