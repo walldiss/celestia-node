@@ -264,7 +264,7 @@ func BenchmarkStore(b *testing.B) {
 	err = edsStore.Start(ctx)
 	require.NoError(b, err)
 
-	// BenchmarkStore/bench_put_128-10         	      10	 1060473754 ns/op (~1s)
+	// BenchmarkStore/bench_put_128-10         	      10	 896065408 ns/op (900ms)
 	b.Run("bench put 128", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {

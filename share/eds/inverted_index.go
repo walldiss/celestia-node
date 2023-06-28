@@ -2,7 +2,6 @@ package eds
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/filecoin-project/dagstore/index"
@@ -33,7 +32,7 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 	sk shard.Key,
 ) error {
 	// in the original implementation, a mutex is used here to prevent unnecessary updates to the
-	// key. The amount of extra data produced by this is negligible, and the performance benefits
+	// key. The amount of extra buf produced by this is negligible, and the performance benefits
 	// from removing the lock are significant (indexing is a hot path during sync).
 	batch, err := s.ds.Batch(ctx)
 	if err != nil {
@@ -48,11 +47,10 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 		}
 
 		if !ok {
-			bz, err := json.Marshal(sk)
 			if err != nil {
 				return fmt.Errorf("failed to marshal shard key to bytes: %w", err)
 			}
-			if err := batch.Put(ctx, key, bz); err != nil {
+			if err := batch.Put(ctx, key, []byte(sk.String())); err != nil {
 				return fmt.Errorf("failed to put mh=%s, err=%w", mh, err)
 			}
 		}
@@ -78,11 +76,5 @@ func (s *simpleInvertedIndex) GetShardsForMultihash(ctx context.Context, mh mult
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup index for mh %s, err: %w", mh, err)
 	}
-
-	var shardKey shard.Key
-	if err := json.Unmarshal(sbz, &shardKey); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal shard key for mh=%s, err=%w", mh, err)
-	}
-
-	return []shard.Key{shardKey}, nil
+	return []shard.Key{shard.KeyFromString(string(sbz))}, nil
 }
