@@ -69,7 +69,10 @@ func NewStore(basepath string, ds datastore.Batching) (*Store, error) {
 	}
 
 	r := mount.NewRegistry()
-	err = r.Register("fs", &mount.FileMount{Path: basepath + blocksPath})
+	err = r.Register("fs", &inMemoryOnceMount{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to register memory mount on the registry: %w", err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to register FS mount on the registry: %w", err)
 	}
@@ -189,7 +192,7 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 		return fmt.Errorf("failed to write EDS to file: %w", err)
 	}
 
-	// write whole buffer in one go to optimise i/o
+	// write whole buffer in one go to optimize i/o
 	if _, err = f.Write(buf.Bytes()); err != nil {
 		return fmt.Errorf("failed to write EDS to file: %w", err)
 	}
