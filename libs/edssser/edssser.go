@@ -4,6 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/celestiaorg/celestia-app/pkg/wrapper"
+	"github.com/celestiaorg/celestia-node/share"
+	"github.com/celestiaorg/celestia-node/share/ipld"
+	"github.com/celestiaorg/celestia-node/share/sharetest"
+	"github.com/celestiaorg/nmt"
+	"github.com/celestiaorg/rsmt2d"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +19,6 @@ import (
 	"github.com/celestiaorg/celestia-app/pkg/da"
 
 	"github.com/celestiaorg/celestia-node/share/eds"
-	"github.com/celestiaorg/celestia-node/share/eds/edstest"
 )
 
 type Config struct {
@@ -65,12 +70,21 @@ func (ss *EDSsser) Run(ctx context.Context) (stats Stats, err error) {
 	t := &testing.T{}
 	for toWrite := ss.config.EDSWrites - len(edsHashes); ctx.Err() == nil && toWrite > 0; toWrite-- {
 		// divide by 2 to get ODS size as expected by RandEDS
-		square := edstest.RandEDS(t, ss.config.EDSSize/2)
+		odsSize := ss.config.EDSSize / 2
+		shares := sharetest.RandShares(t, odsSize*odsSize)
+		adder := ipld.NewProofsAdder(odsSize * 2)
+		square, err := rsmt2d.ComputeExtendedDataSquare(
+			shares, share.DefaultRSMT2DCodec(),
+			wrapper.NewConstructor(uint64(odsSize),
+				nmt.NodeVisitor(adder.VisitFn()),
+			))
+
 		dah, err := da.NewDataAvailabilityHeader(square)
 		if err != nil {
 			return stats, err
 		}
 
+		ctx := ipld.CtxWithProofsAdder(ctx, adder)
 		now := time.Now()
 		err = ss.edsstore.Put(ctx, dah.Hash(), square)
 		if err != nil {
