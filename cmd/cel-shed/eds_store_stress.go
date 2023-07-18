@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"expvar"
 	_ "expvar"
 	"fmt"
 	"github.com/pyroscope-io/client/pyroscope"
 	"go.uber.org/zap"
 	"math"
 	"net/http"
+	"net/http/pprof"
 	"os"
 
 	"github.com/mitchellh/go-homedir"
@@ -69,7 +71,21 @@ var edsStoreStress = &cobra.Command{
 
 		endpoint, _ := cmd.Flags().GetString(pyroscopeEndpoint)
 		if endpoint != "" {
-			_, err := pyroscope.Start(pyroscope.Config{
+			mux := http.NewServeMux()
+			mux.HandleFunc("/debug/pprof/", pprof.Index)
+			mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+			mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+			mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+			mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+			mux.Handle("/debug/vars", expvar.Handler())
+			err := http.ListenAndServe("0.0.0.0:6000", mux) //nolint:gosec
+			if err != nil {
+				fmt.Println("failed to start pprof server", err)
+			} else {
+				fmt.Println("started pprof server on port 6000")
+			}
+
+			_, err = pyroscope.Start(pyroscope.Config{
 				ApplicationName: "cel-shred.stresser",
 				ServerAddress:   endpoint,
 				Logger:          zap.L().Sugar(),
