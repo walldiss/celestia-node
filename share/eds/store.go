@@ -189,7 +189,7 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 	// save encoded eds into buffer
 	mount := &inMemoryOnceMount{
 		// TODO: buffer could be pre-allocated with capacity calculated based on eds size.
-		buf:   bytes.NewBuffer(nil),
+		buf:   bytes.NewBuffer(make([]byte, 0, int(1200*square.Width()*square.Width()))),
 		Mount: &mount.FileMount{Path: s.basepath + blocksPath + key},
 	}
 	err = WriteEDS(ctx, square, mount)
