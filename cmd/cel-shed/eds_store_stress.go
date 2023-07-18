@@ -5,6 +5,8 @@ import (
 	"errors"
 	_ "expvar"
 	"fmt"
+	"github.com/pyroscope-io/client/pyroscope"
+	"go.uber.org/zap"
 	"math"
 	"net/http"
 	"os"
@@ -25,6 +27,8 @@ const (
 	edsLogStatFreqFlag = "log-stat-freq"
 	edsCleanupFlag     = "cleanup"
 	edsFreshStartFlag  = "fresh"
+
+	pyroscopeEndpoint = "pyroscope"
 )
 
 func init() {
@@ -38,6 +42,7 @@ func init() {
 
 	pathFlagUsage := fmt.Sprintf("Directory path to use for stress test. Uses %s by default.", defaultPath)
 	edsStoreStress.Flags().String(edsStorePathFlag, path, pathFlagUsage)
+	edsStoreStress.Flags().String(pyroscopeEndpoint, "", "Pyroscope address")
 	edsStoreStress.Flags().Int(edsWritesFlag, math.MaxInt, "Total EDS writes to make. MaxInt by default.")
 	edsStoreStress.Flags().Int(edsSizeFlag, 128, "Chooses EDS size. 128 by default.")
 	edsStoreStress.Flags().Bool(edsDisableLogFlag, false, "Disables logging. Enabled by default.")
@@ -61,6 +66,26 @@ var edsStoreStress = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) (err error) {
 		// expose expvar vars over http
 		go http.ListenAndServe(":9999", http.DefaultServeMux)
+
+		endpoint, _ := cmd.Flags().GetString(pyroscopeEndpoint)
+		if endpoint != "" {
+			_, err := pyroscope.Start(pyroscope.Config{
+				ApplicationName: "cel-shred.stresser",
+				ServerAddress:   endpoint,
+				Logger:          zap.L().Sugar(),
+				ProfileTypes: []pyroscope.ProfileType{
+					pyroscope.ProfileCPU,
+					pyroscope.ProfileAllocObjects,
+					pyroscope.ProfileAllocSpace,
+					pyroscope.ProfileInuseObjects,
+					pyroscope.ProfileInuseSpace,
+				},
+			})
+			if err != nil {
+				fmt.Printf("failed to launch pyroscope with addr: %s err: %s\n", endpoint, err.Error())
+			}
+			fmt.Println("run pyroscope on:", endpoint)
+		}
 
 		path, _ := cmd.Flags().GetString(edsStorePathFlag)
 		fmt.Printf("using %s\n", path)
