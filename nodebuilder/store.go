@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
-	"github.com/dgraph-io/badger/v4/options"
 	"github.com/ipfs/go-datastore"
 	"github.com/mitchellh/go-homedir"
 	"path/filepath"
@@ -125,17 +124,17 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	opts.BaseTableSize = 2 * 16 << 20
 	opts.BaseLevelSize = 10 * 8 << 20
 	opts.TableSizeMultiplier = 2
-	opts.LevelSizeMultiplier = 100
+	opts.LevelSizeMultiplier = 10
 
-	opts.NumCompactors = 4 // Run at least 2 compactors. Zero-th compactor prioritizes L0.
-	opts.NumLevelZeroTables = 5 * 10
-	opts.NumLevelZeroTablesStall = 15 * 10
-	opts.NumMemtables = 5
-	opts.BloomFalsePositive = 0.01
-	opts.BlockSize = 4 * 16 * 1024
-	opts.Compression = options.None
-	opts.BlockCacheSize = 256 << 20
-	opts.IndexCacheSize = 100 << 20 // TODO: probably not needed
+	//opts.NumCompactors = 4 // Run at least 2 compactors. Zero-th compactor prioritizes L0.
+	//opts.NumLevelZeroTables = 5 * 10
+	//opts.NumLevelZeroTablesStall = 15 * 10
+	//opts.NumMemtables = 5
+	//opts.BloomFalsePositive = 0.01
+	//opts.BlockSize = 4 * 16 * 1024
+	//opts.Compression = options.None
+	//opts.BlockCacheSize = 256 << 20
+	//opts.IndexCacheSize = 100 << 20 // TODO: probably not needed
 
 	// Badger sets ValueThreshold to 1K by default and this makes shares being stored in LSM tree
 	// instead of the value log, so we change the value to be lower than share size,
