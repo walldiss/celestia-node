@@ -3,13 +3,11 @@ package nodebuilder
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
-	"sync"
-	"time"
-
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	"github.com/ipfs/go-datastore"
 	"github.com/mitchellh/go-homedir"
+	"path/filepath"
+	"sync"
 
 	dsbadger "github.com/celestiaorg/go-ds-badger4"
 
@@ -123,11 +121,11 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	// Badger sets ValueThreshold to 1K by default and this makes shares being stored in LSM tree
 	// instead of the value log, so we change the value to be lower than share size,
 	// so shares are store in value log. For value log and LSM definitions
-	opts.ValueThreshold = 128
+	//opts.ValueThreshold = 128
 	// We always write unique values to Badger transaction so there is no need to detect conflicts.
-	opts.DetectConflicts = false
-	opts.MetricsEnabled = true
-	opts.GcInterval = 5 * time.Minute
+	//opts.DetectConflicts = false
+	//opts.MetricsEnabled = true
+	//opts.GcInterval = 5 * time.Minute
 	ds, err := dsbadger.NewDatastore(dataPath(f.path), &opts)
 	if err != nil {
 		return nil, fmt.Errorf("node: can't open Badger Datastore: %w", err)
