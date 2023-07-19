@@ -131,7 +131,7 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	//opts.NumLevelZeroTablesStall = 15 * 10
 	//opts.NumMemtables = 5
 	//opts.BloomFalsePositive = 0.01
-	opts.BlockSize = 4 * 16 * 1024
+	opts.BlockSize = 4 / 4 * 1024
 	//opts.Compression = options.None
 	//opts.BlockCacheSize = 256 << 20
 	//opts.IndexCacheSize = 100 << 20 // TODO: probably not needed
