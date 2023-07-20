@@ -101,7 +101,7 @@ func (ss *EDSsser) Run(ctx context.Context) (stats Stats, err error) {
 		}
 
 		if ss.config.EnableLog {
-			fmt.Println("square written", "size", ss.config.EDSSize, "took", took)
+			fmt.Println("square written", "size", ss.config.EDSSize, "took", took, "at", time.Now())
 
 			if stats.TotalWritten%ss.config.StatLogFreq == 0 {
 				fmt.Println(stats.Finalize())
