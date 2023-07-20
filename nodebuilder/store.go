@@ -8,6 +8,7 @@ import (
 	"github.com/mitchellh/go-homedir"
 	"path/filepath"
 	"sync"
+	"time"
 
 	dsbadger "github.com/celestiaorg/go-ds-badger4"
 
@@ -117,6 +118,8 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	}
 
 	opts := dsbadger.DefaultOptions // this should be copied
+	opts.GcInterval = time.Second * 30
+	opts.GcSleep = time.Second
 	//opts.DetectConflicts = true
 
 	//opts.Compression = 0
