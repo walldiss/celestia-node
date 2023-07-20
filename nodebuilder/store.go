@@ -120,18 +120,18 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	//opts.DetectConflicts = true
 
 	opts.Compression = 0
-	opts.MemTableSize = 64 * 8 << 20
+	opts.MemTableSize = 64 * 16 << 20
 	opts.BaseTableSize = 2 * 16 << 20
-	opts.BaseLevelSize = 10 * 8 << 20
-	opts.TableSizeMultiplier = 2
-	opts.LevelSizeMultiplier = 10
+	opts.BaseLevelSize = 10 * 16 << 20
+	opts.TableSizeMultiplier = 4
+	opts.LevelSizeMultiplier = 16
 
 	//opts.NumCompactors = 4 // Run at least 2 compactors. Zero-th compactor prioritizes L0.
 	//opts.NumLevelZeroTables = 5 * 10
 	//opts.NumLevelZeroTablesStall = 15 * 10
 	//opts.NumMemtables = 5
 	//opts.BloomFalsePositive = 0.01
-	opts.BlockSize = 4 / 4 * 1024
+	opts.BlockSize = 4 * 16 * 1024
 	//opts.Compression = options.None
 	//opts.BlockCacheSize = 256 << 20
 	//opts.IndexCacheSize = 100 << 20 // TODO: probably not needed
