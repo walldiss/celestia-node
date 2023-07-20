@@ -61,9 +61,9 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 		return fmt.Errorf("failed to commit batch: %w", err)
 	}
 
-	//if err := s.ds.Sync(ctx, ds.Key{}); err != nil {
-	//	return fmt.Errorf("failed to sync puts: %w", err)
-	//}
+	if err := s.ds.Sync(ctx, ds.Key{}); err != nil {
+		return fmt.Errorf("failed to sync puts: %w", err)
+	}
 	return nil
 }
 
