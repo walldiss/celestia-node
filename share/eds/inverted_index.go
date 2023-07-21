@@ -8,6 +8,7 @@ import (
 	ds "github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/namespace"
 	"github.com/multiformats/go-multihash"
+	"time"
 )
 
 // simpleInvertedIndex is an inverted index that only stores a single shard key per multihash. Its
@@ -35,7 +36,9 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 	// from removing the lock are significant (indexing is a hot path during sync).
 	batch, err := s.ds.Batch(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to create ds batch: %w", err)
+		err = fmt.Errorf("failed to create ds batch: %w", err)
+		fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+		return err
 	}
 
 	if err := mhIter.ForEach(func(mh multihash.Multihash) error {
@@ -47,7 +50,9 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 		//
 		//if !ok {
 		if err := batch.Put(ctx, key, []byte(sk.String())); err != nil {
-			return fmt.Errorf("failed to put mh=%s, err=%w", mh, err)
+			err = fmt.Errorf("failed to put mh=%s, err=%w", mh, err)
+			fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+			return err
 		}
 		//}
 
@@ -57,11 +62,15 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 	}
 
 	if err := batch.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit batch: %w", err)
+		err = fmt.Errorf("failed to commit batch: %w", err)
+		fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+		return err
 	}
 
 	if err := s.ds.Sync(ctx, ds.Key{}); err != nil {
-		return fmt.Errorf("failed to sync puts: %w", err)
+		err = fmt.Errorf("failed to sync puts: %w", err)
+		fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+		return err
 	}
 	return nil
 }
