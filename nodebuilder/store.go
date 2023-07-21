@@ -119,7 +119,8 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 
 	opts := dsbadger.DefaultOptions // this should be copied
 	opts.NumGoroutines = 7
-	opts.NumCompactors = 2
+	opts.NumCompactors = 14
+	opts.LmaxCompaction = true
 	opts.GcInterval = time.Second * 30
 	opts.GcSleep = time.Second
 	//opts.DetectConflicts = true
