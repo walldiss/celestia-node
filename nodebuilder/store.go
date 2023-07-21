@@ -121,10 +121,10 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	opts.NumGoroutines = 7
 	opts.NumCompactors = 14
 	opts.LmaxCompaction = true
-	opts.GcInterval = time.Second * 30
+	opts.GcInterval = 0
 	opts.GcSleep = time.Second
 
-	opts.VLogPercentile = 1.0 // fuck vlog! put everything in lsm
+	//opts.VLogPercentile = 1.0 // fuck vlog! put everything in lsm
 	//opts.DetectConflicts = true
 
 	//opts.Compression = 0
