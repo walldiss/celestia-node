@@ -35,9 +35,9 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 	// key. The amount of extra data produced by this is negligible, and the performance benefits
 	// from removing the lock are significant (indexing is a hot path during sync).
 	batch, err := s.ds.Batch(ctx)
-	if err != nil {
+	if err != nil || ctx.Err() != nil {
 		err = fmt.Errorf("failed to create ds batch: %w", err)
-		fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+		fmt.Println("ERROR IN INVERTED INDEX", err, "ctx err", ctx.Err(), time.Now())
 		return err
 	}
 
@@ -49,27 +49,29 @@ func (s *simpleInvertedIndex) AddMultihashesForShard(
 		//}
 		//
 		//if !ok {
-		if err := batch.Put(ctx, key, []byte(sk.String())); err != nil {
+		if err := batch.Put(ctx, key, []byte(sk.String())); err != nil || ctx.Err() != nil {
 			err = fmt.Errorf("failed to put mh=%s, err=%w", mh, err)
-			fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+			fmt.Println("ERROR IN INVERTED INDEX", "ctx err", ctx.Err(), time.Now())
 			return err
 		}
 		//}
 
 		return nil
-	}); err != nil {
-		return fmt.Errorf("failed to add index entry: %w", err)
-	}
-
-	if err := batch.Commit(ctx); err != nil {
-		err = fmt.Errorf("failed to commit batch: %w", err)
-		fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+	}); err != nil || ctx.Err() != nil {
+		err = fmt.Errorf("failed to add index entry: %w", err)
+		fmt.Println("ERROR IN INVERTED INDEX", "ctx err", ctx.Err(), time.Now())
 		return err
 	}
 
-	if err := s.ds.Sync(ctx, ds.Key{}); err != nil {
+	if err := batch.Commit(ctx); err != nil || ctx.Err() != nil {
+		err = fmt.Errorf("failed to commit batch: %w", err)
+		fmt.Println("ERROR IN INVERTED INDEX", "ctx err", ctx.Err(), time.Now())
+		return err
+	}
+
+	if err := s.ds.Sync(ctx, ds.Key{}); err != nil || ctx.Err() != nil {
 		err = fmt.Errorf("failed to sync puts: %w", err)
-		fmt.Println("ERROR IN INVERTED INDEX", err, time.Now())
+		fmt.Println("ERROR IN INVERTED INDEX", "ctx err", ctx.Err(), time.Now())
 		return err
 	}
 	return nil
