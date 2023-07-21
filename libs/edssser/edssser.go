@@ -70,16 +70,37 @@ func (ss *EDSsser) Run(ctx context.Context) (stats Stats, err error) {
 
 	t := &testing.T{}
 	for toWrite := ss.config.EDSWrites - len(edsHashes); ctx.Err() == nil && toWrite > 0; toWrite-- {
-		err := ss.put(ctx, t, &stats)
-		if err != nil {
-			fmt.Println("ERROR", err.Error())
+		took, err := ss.put(ctx, t)
+
+		stats.TotalWritten++
+		stats.TotalTime += took
+		if took < stats.MinTime || stats.MinTime == 0 {
+			stats.MinTime = took
+		} else if took > stats.MaxTime {
+			stats.MaxTime = took
+		}
+
+		if ss.config.EnableLog {
+			if stats.TotalWritten%ss.config.StatLogFreq == 0 {
+				fmt.Println(stats.Finalize())
+			}
+			if err != nil {
+				fmt.Println("ERROR", err.Error(), "took", took, "at", time.Now())
+				return
+			}
+			if took > time.Second*20 {
+				fmt.Println("long put", "size", ss.config.EDSSize, "took", took, "at", time.Now())
+				return
+			}
+
+			fmt.Println("square written", "size", ss.config.EDSSize, "took", took, "at", time.Now())
 		}
 	}
 
 	return stats, nil
 }
 
-func (ss *EDSsser) put(ctx context.Context, t *testing.T, stats *Stats) error {
+func (ss *EDSsser) put(ctx context.Context, t *testing.T) (time.Duration, error) {
 	ctx, cancel := context.WithTimeout(ctx, ss.config.OpTimeout)
 	defer cancel()
 
@@ -93,42 +114,23 @@ func (ss *EDSsser) put(ctx context.Context, t *testing.T, stats *Stats) error {
 			nmt.NodeVisitor(adder.VisitFn()),
 		))
 	if err != nil {
-		return fmt.Errorf("compute eds: %w", err)
+		return 0, fmt.Errorf("compute eds: %w", err)
 	}
 
 	dah, err := da.NewDataAvailabilityHeader(square)
 	if err != nil {
-		return fmt.Errorf("creating dah: %w", err)
+		return 0, fmt.Errorf("creating dah: %w", err)
 	}
 
 	ctx = ipld.CtxWithProofsAdder(ctx, adder)
 	now := time.Now()
 	err = ss.edsstore.Put(ctx, dah.Hash(), square)
-	if err != nil {
-		return fmt.Errorf("put: %w", err)
-	}
 	took := time.Since(now)
 
-	stats.TotalWritten++
-	stats.TotalTime += took
-	if took < stats.MinTime || stats.MinTime == 0 {
-		stats.MinTime = took
-	} else if took > stats.MaxTime {
-		stats.MaxTime = took
+	if err != nil {
+		return took, fmt.Errorf("put: %w", err)
 	}
-
-	if ss.config.EnableLog {
-		if took > time.Second*20 {
-			fmt.Println("long put", "size", ss.config.EDSSize, "took", took, "at", time.Now())
-		} else {
-			fmt.Println("square written", "size", ss.config.EDSSize, "took", took, "at", time.Now())
-		}
-
-		if stats.TotalWritten%ss.config.StatLogFreq == 0 {
-			fmt.Println(stats.Finalize())
-		}
-	}
-	return nil
+	return took, nil
 }
 
 type Stats struct {
