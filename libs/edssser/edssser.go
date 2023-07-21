@@ -86,11 +86,11 @@ func (ss *EDSsser) Run(ctx context.Context) (stats Stats, err error) {
 			}
 			if err != nil {
 				fmt.Println("ERROR", err.Error(), "took", took, "at", time.Now())
-				return
+				continue
 			}
 			if took > time.Second*20 {
 				fmt.Println("long put", "size", ss.config.EDSSize, "took", took, "at", time.Now())
-				return
+				continue
 			}
 
 			fmt.Println("square written", "size", ss.config.EDSSize, "took", took, "at", time.Now())
