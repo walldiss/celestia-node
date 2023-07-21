@@ -92,17 +92,20 @@ func (ss *EDSsser) put(ctx context.Context, t *testing.T, stats *Stats) error {
 		wrapper.NewConstructor(uint64(odsSize),
 			nmt.NodeVisitor(adder.VisitFn()),
 		))
+	if err != nil {
+		return fmt.Errorf("compute eds: %w", err)
+	}
 
 	dah, err := da.NewDataAvailabilityHeader(square)
 	if err != nil {
-		return err
+		return fmt.Errorf("creating dah: %w", err)
 	}
 
 	ctx = ipld.CtxWithProofsAdder(ctx, adder)
 	now := time.Now()
 	err = ss.edsstore.Put(ctx, dah.Hash(), square)
 	if err != nil {
-		return err
+		return fmt.Errorf("put: %w", err)
 	}
 	took := time.Since(now)
 

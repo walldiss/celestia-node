@@ -210,7 +210,16 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		tnow := time.Now()
+		select {
+		case <-time.After(time.Second * 30):
+			return fmt.Errorf("parent expired, but register shard is stuck for more than %v sec", time.Since(tnow))
+		case result := <-ch:
+			if result.Error != nil {
+				return fmt.Errorf("failed to register shard: %w, after context expired: %v", result.Error, time.Since(tnow))
+			}
+			return fmt.Errorf("parent expired, but register shard no error, after context expired: %v", time.Since(tnow))
+		}
 	case result := <-ch:
 		if result.Error != nil {
 			return fmt.Errorf("failed to register shard: %w", result.Error)
