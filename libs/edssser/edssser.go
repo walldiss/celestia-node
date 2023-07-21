@@ -26,6 +26,7 @@ type Config struct {
 	EDSWrites   int
 	EnableLog   bool
 	StatLogFreq int
+	OpTimeout   time.Duration
 }
 
 // EDSsser stand for EDS Store Stresser.
@@ -69,51 +70,62 @@ func (ss *EDSsser) Run(ctx context.Context) (stats Stats, err error) {
 
 	t := &testing.T{}
 	for toWrite := ss.config.EDSWrites - len(edsHashes); ctx.Err() == nil && toWrite > 0; toWrite-- {
-		// divide by 2 to get ODS size as expected by RandEDS
-		odsSize := ss.config.EDSSize / 2
-		shares := sharetest.RandShares(t, odsSize*odsSize)
-		adder := ipld.NewProofsAdder(odsSize * 2)
-		square, err := rsmt2d.ComputeExtendedDataSquare(
-			shares, share.DefaultRSMT2DCodec(),
-			wrapper.NewConstructor(uint64(odsSize),
-				nmt.NodeVisitor(adder.VisitFn()),
-			))
-
-		dah, err := da.NewDataAvailabilityHeader(square)
+		err := ss.put(ctx, t, &stats)
 		if err != nil {
-			return stats, err
-		}
-
-		ctx := ipld.CtxWithProofsAdder(ctx, adder)
-		now := time.Now()
-		err = ss.edsstore.Put(ctx, dah.Hash(), square)
-		if err != nil {
-			return stats, err
-		}
-		took := time.Since(now)
-
-		stats.TotalWritten++
-		stats.TotalTime += took
-		if took < stats.MinTime || stats.MinTime == 0 {
-			stats.MinTime = took
-		} else if took > stats.MaxTime {
-			stats.MaxTime = took
-		}
-
-		if ss.config.EnableLog {
-			if took > time.Second*30 {
-				fmt.Println("long put", "size", ss.config.EDSSize, "took", took, "at", time.Now())
-			} else {
-				fmt.Println("square written", "size", ss.config.EDSSize, "took", took, "at", time.Now())
-			}
-
-			if stats.TotalWritten%ss.config.StatLogFreq == 0 {
-				fmt.Println(stats.Finalize())
-			}
+			fmt.Println("ERROR", err.Error())
 		}
 	}
 
 	return stats, nil
+}
+
+func (ss *EDSsser) put(ctx context.Context, t *testing.T, stats *Stats) error {
+	ctx, cancel := context.WithTimeout(ctx, ss.config.OpTimeout)
+	defer cancel()
+
+	// divide by 2 to get ODS size as expected by RandEDS
+	odsSize := ss.config.EDSSize / 2
+	shares := sharetest.RandShares(t, odsSize*odsSize)
+	adder := ipld.NewProofsAdder(odsSize * 2)
+	square, err := rsmt2d.ComputeExtendedDataSquare(
+		shares, share.DefaultRSMT2DCodec(),
+		wrapper.NewConstructor(uint64(odsSize),
+			nmt.NodeVisitor(adder.VisitFn()),
+		))
+
+	dah, err := da.NewDataAvailabilityHeader(square)
+	if err != nil {
+		return err
+	}
+
+	ctx = ipld.CtxWithProofsAdder(ctx, adder)
+	now := time.Now()
+	err = ss.edsstore.Put(ctx, dah.Hash(), square)
+	if err != nil {
+		return err
+	}
+	took := time.Since(now)
+
+	stats.TotalWritten++
+	stats.TotalTime += took
+	if took < stats.MinTime || stats.MinTime == 0 {
+		stats.MinTime = took
+	} else if took > stats.MaxTime {
+		stats.MaxTime = took
+	}
+
+	if ss.config.EnableLog {
+		if took > time.Second*20 {
+			fmt.Println("long put", "size", ss.config.EDSSize, "took", took, "at", time.Now())
+		} else {
+			fmt.Println("square written", "size", ss.config.EDSSize, "took", took, "at", time.Now())
+		}
+
+		if stats.TotalWritten%ss.config.StatLogFreq == 0 {
+			fmt.Println(stats.Finalize())
+		}
+	}
+	return nil
 }
 
 type Stats struct {

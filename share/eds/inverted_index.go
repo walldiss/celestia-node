@@ -3,7 +3,6 @@ package eds
 import (
 	"context"
 	"fmt"
-
 	"github.com/filecoin-project/dagstore/index"
 	"github.com/filecoin-project/dagstore/shard"
 	ds "github.com/ipfs/go-datastore"

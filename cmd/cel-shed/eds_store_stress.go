@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
@@ -28,7 +29,8 @@ const (
 	edsCleanupFlag     = "cleanup"
 	edsFreshStartFlag  = "fresh"
 
-	pyroscopeEndpoint = "pyroscope"
+	pyroscopeEndpointFlag = "pyroscope"
+	putTimeoutFlag        = "timeout"
 )
 
 func init() {
@@ -42,13 +44,14 @@ func init() {
 
 	pathFlagUsage := fmt.Sprintf("Directory path to use for stress test. Uses %s by default.", defaultPath)
 	edsStoreStress.Flags().String(edsStorePathFlag, path, pathFlagUsage)
-	edsStoreStress.Flags().String(pyroscopeEndpoint, "", "Pyroscope address")
+	edsStoreStress.Flags().String(pyroscopeEndpointFlag, "", "Pyroscope address")
 	edsStoreStress.Flags().Int(edsWritesFlag, math.MaxInt, "Total EDS writes to make. MaxInt by default.")
 	edsStoreStress.Flags().Int(edsSizeFlag, 128, "Chooses EDS size. 128 by default.")
 	edsStoreStress.Flags().Bool(edsDisableLogFlag, false, "Disables logging. Enabled by default.")
 	edsStoreStress.Flags().Int(edsLogStatFreqFlag, 10, "Write statistic logging frequency. 10 by default.")
 	edsStoreStress.Flags().Bool(edsCleanupFlag, false, "Cleans up the store on stop. Disabled by default.")
 	edsStoreStress.Flags().Bool(edsFreshStartFlag, false, "Cleanup previous state on start. Disabled by default.")
+	edsStoreStress.Flags().Int(putTimeoutFlag, 30, "Sets put timeout in seconds. 30 sec by default.")
 
 	// kill redundant print
 	nodebuilder.PrintKeyringInfo = false
@@ -68,7 +71,7 @@ var edsStoreStress = &cobra.Command{
 		go http.ListenAndServe(":9999", http.DefaultServeMux)
 
 		fmt.Println("start")
-		endpoint, _ := cmd.Flags().GetString(pyroscopeEndpoint)
+		endpoint, _ := cmd.Flags().GetString(pyroscopeEndpointFlag)
 		if endpoint != "" {
 			_, err = pyroscope.Start(pyroscope.Config{
 				ApplicationName: "cel-shred.stresser",
@@ -110,11 +113,13 @@ var edsStoreStress = &cobra.Command{
 		logFreq, _ := cmd.Flags().GetInt(edsLogStatFreqFlag)
 		edsWrites, _ := cmd.Flags().GetInt(edsWritesFlag)
 		edsSize, _ := cmd.Flags().GetInt(edsSizeFlag)
+		putTimeout, _ := cmd.Flags().GetInt(putTimeoutFlag)
 		cfg := edssser.Config{
 			EDSSize:     edsSize,
 			EDSWrites:   edsWrites,
 			EnableLog:   !disableLog,
 			StatLogFreq: logFreq,
+			OpTimeout:   time.Duration(putTimeout) * time.Second,
 		}
 
 		err = nodebuilder.Init(*nodebuilder.DefaultConfig(node.Full), path, node.Full)
