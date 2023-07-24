@@ -214,7 +214,7 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 		tnow := time.Now()
 		select {
 		case <-time.After(time.Second * 30):
-			buf := make([]byte, 10<<10)
+			buf := make([]byte, 10<<16)
 			n := runtime.Stack(buf, true)
 			fmt.Println("ERROR: stacktraces", string(buf[:n]))
 			return fmt.Errorf("parent expired, but register shard is stuck for more than %v sec", time.Since(tnow))
