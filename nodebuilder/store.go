@@ -1,6 +1,7 @@
 package nodebuilder
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
@@ -157,6 +158,7 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 		return nil, fmt.Errorf("node: can't open Badger Datastore: %w", err)
 	}
 
+	ds.DiskUsage(context.Background())
 	f.data = ds
 	return ds, nil
 }
