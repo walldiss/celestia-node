@@ -20,9 +20,8 @@ require (
 	github.com/cosmos/cosmos-sdk v0.46.13
 	github.com/cosmos/cosmos-sdk/api v0.1.0
 	github.com/cristalhq/jwt v1.2.0
-	github.com/dgraph-io/badger/v4 v4.1.0
 	github.com/etclabscore/go-openrpc-reflect v0.0.37
-	github.com/filecoin-project/dagstore v0.5.6
+	github.com/filecoin-project/dagstore v0.7.0
 	github.com/filecoin-project/go-jsonrpc v0.3.1
 	github.com/gammazero/workerpool v1.1.3
 	github.com/gogo/protobuf v1.3.3
@@ -92,7 +91,6 @@ require (
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/ChainSafe/go-schnorrkel v1.0.0 // indirect
-	github.com/DataDog/zstd v1.5.2 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
@@ -110,11 +108,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/cockroachdb/apd/v2 v2.0.2 // indirect
-	github.com/cockroachdb/errors v1.9.1 // indirect
-	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
 	github.com/cockroachdb/pebble v0.0.0-20230720154706-692f3b61a3c4 // indirect
-	github.com/cockroachdb/redact v1.1.3 // indirect
-	github.com/cockroachdb/tokenbucket v0.0.0-20230613231145-182959a1fad6 // indirect
 	github.com/coinbase/rosetta-sdk-go v0.7.9 // indirect
 	github.com/cometbft/cometbft-db v0.7.0 // indirect
 	github.com/confio/ics23/go v0.9.0 // indirect
@@ -138,6 +132,7 @@ require (
 	github.com/deepmap/oapi-codegen v1.8.2 // indirect
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f // indirect
 	github.com/dgraph-io/badger/v2 v2.2007.4 // indirect
+	github.com/dgraph-io/badger/v4 v4.1.0 // indirect
 	github.com/dgraph-io/ristretto v0.1.1 // indirect
 	github.com/dgryski/go-farm v0.0.0-20200201041132-a6ae2369ad13 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -151,7 +146,7 @@ require (
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gammazero/deque v0.2.0 // indirect
-	github.com/getsentry/sentry-go v0.18.0 // indirect
+	github.com/gin-gonic/gin v1.8.1 // indirect
 	github.com/go-kit/kit v0.12.0 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
@@ -162,8 +157,10 @@ require (
 	github.com/go-openapi/jsonreference v0.19.4 // indirect
 	github.com/go-openapi/spec v0.19.11 // indirect
 	github.com/go-openapi/swag v0.19.11 // indirect
+	github.com/go-playground/validator/v10 v10.11.1 // indirect
 	github.com/go-stack/stack v1.8.1 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
+	github.com/goccy/go-json v0.9.11 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gogo/gateway v1.1.0 // indirect
@@ -231,8 +228,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.5 // indirect
 	github.com/klauspost/reedsolomon v1.11.1 // indirect
 	github.com/koron/go-ssdp v0.0.4 // indirect
-	github.com/kr/pretty v0.3.1 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/lib/pq v1.10.7 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
@@ -291,7 +286,6 @@ require (
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
 	github.com/regen-network/cosmos-proto v0.3.1 // indirect
 	github.com/rivo/uniseg v0.4.2 // indirect
-	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	github.com/rs/cors v1.8.2 // indirect
 	github.com/rs/zerolog v1.29.1 // indirect
 	github.com/sasha-s/go-deadlock v0.3.1 // indirect
