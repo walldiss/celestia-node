@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -163,6 +164,7 @@ func (s *Store) gc(ctx context.Context) {
 // Additionally, the file gets indexed s.t. store.Blockstore can access them.
 func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.ExtendedDataSquare) (err error) {
 	// if root already exists, short-circuit
+	fmt.Println("has?")
 	has, err := s.Has(ctx, root)
 	if err != nil {
 		return fmt.Errorf("failed to check if root already exists in index: %w", err)
@@ -170,6 +172,7 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 	if has {
 		return dagstore.ErrShardExists
 	}
+	fmt.Println("has done")
 
 	ctx, span := tracer.Start(ctx, "store/put", trace.WithAttributes(
 		attribute.String("root", root.String()),
@@ -203,6 +206,7 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 	}
 
 	ch := make(chan dagstore.ShardResult, 1)
+	fmt.Println("reg shard")
 	err = s.dgstr.RegisterShard(ctx, shard.KeyFromString(key), mount, ch, dagstore.RegisterOpts{})
 	if err != nil {
 		return fmt.Errorf("failed to initiate shard registration: %w", err)
@@ -213,6 +217,9 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 		tnow := time.Now()
 		select {
 		case <-time.After(time.Second * 30):
+			buf := make([]byte, 10<<10)
+			n := runtime.Stack(buf, true)
+			fmt.Println("ERROR: stacktraces", string(buf[:n]))
 			return fmt.Errorf("parent expired, but register shard is stuck for more than %v sec", time.Since(tnow))
 		case result := <-ch:
 			if result.Error != nil {
@@ -491,3 +498,24 @@ type inMemoryReader struct {
 func (r *inMemoryReader) Close() error {
 	return nil
 }
+
+//type batchWrite struct{
+//	datastore.Datastore
+//	b datastore.Batch
+//}
+//
+//func newBatch(ctx context.Context,d datastore.Batching) batchWrite{
+//	d.Batch(ctx)
+//	return batchWrite{
+//		Datastore: d,
+//		b:         ,
+//	}
+//}
+//
+//func (b *batchWrite) Put(ctx context.Context, key datastore.Key, value []byte) error {
+//	return b.b.Put(ctx,key,value)
+//}
+//
+//func (b *batchWrite) Delete(ctx context.Context, key datastore.Key) error {
+//	return b.b.Delete(ctx,key)
+//}
