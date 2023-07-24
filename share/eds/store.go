@@ -212,17 +212,25 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 	select {
 	case <-ctx.Done():
 		tnow := time.Now()
-		select {
-		case <-time.After(time.Second * 30):
-			buf := make([]byte, 10<<16)
-			n := runtime.Stack(buf, true)
-			fmt.Println("ERROR: stacktraces", string(buf[:n]))
-			return fmt.Errorf("parent expired, but register shard is stuck for more than %v sec", time.Since(tnow))
-		case result := <-ch:
-			if result.Error != nil {
-				return fmt.Errorf("failed to register shard: %w, after context expired: %v", result.Error, time.Since(tnow))
+		var failed bool
+		for {
+			select {
+			case <-time.After(time.Second * 10):
+				fmt.Printf("\nERROR: parent expired, but register shard is stuck for more than %v sec", time.Since(tnow))
+				failed = true
+
+				buf := make([]byte, 10<<16)
+				n := runtime.Stack(buf, true)
+				fmt.Println("ERROR: Put is stuck, hangup stacktraces:", string(buf[:n]))
+			case result := <-ch:
+				if result.Error != nil {
+					return fmt.Errorf("failed to register shard: %w, after context expired: %v", result.Error, time.Since(tnow))
+				}
+				if failed {
+					return fmt.Errorf("parent expired, but register shard no error, after context expired: %v", time.Since(tnow))
+				}
+				return nil
 			}
-			return fmt.Errorf("parent expired, but register shard no error, after context expired: %v", time.Since(tnow))
 		}
 	case result := <-ch:
 		if result.Error != nil {
