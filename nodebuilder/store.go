@@ -119,11 +119,14 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	}
 
 	opts := dsbadger.DefaultOptions // this should be copied
-	opts.NumGoroutines = 7
-	opts.NumCompactors = 14
-	opts.LmaxCompaction = true
+	opts.NumGoroutines = 8
+	//opts.LmaxCompaction = true
 	opts.GcInterval = 0
 	opts.GcSleep = time.Second
+	opts.NumCompactors = 7 // Run at least 2 compactors. Zero-th compactor prioritizes L0.
+	opts.NumLevelZeroTables = 2
+	opts.NumMemtables = 10
+	opts.NumLevelZeroTablesStall = 15
 
 	//opts.VLogPercentile = 1.0 // fuck vlog! put everything in lsm
 	//opts.DetectConflicts = true
