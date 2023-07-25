@@ -212,21 +212,24 @@ func (s *Store) Put(ctx context.Context, root share.DataHash, square *rsmt2d.Ext
 	select {
 	case <-ctx.Done():
 		tnow := time.Now()
-		var failed bool
+		var failed int
 		for {
 			select {
 			case <-time.After(time.Second * 10):
 				fmt.Printf("\nERROR: parent expired, but register shard is stuck for more than %v sec", time.Since(tnow))
-				failed = true
+				failed++
 
 				buf := make([]byte, 10<<16)
 				n := runtime.Stack(buf, true)
 				fmt.Println("ERROR: Put is stuck, hangup stacktraces:", string(buf[:n]))
+				if failed > 30 {
+					return fmt.Errorf("\nERROR: parent expired, register shard is in DEADLOCK for more than %v sec", time.Since(tnow))
+				}
 			case result := <-ch:
 				if result.Error != nil {
 					return fmt.Errorf("failed to register shard: %w, after context expired: %v", result.Error, time.Since(tnow))
 				}
-				if failed {
+				if failed > 0 {
 					return fmt.Errorf("parent expired, but register shard no error, after context expired: %v", time.Since(tnow))
 				}
 				return nil
