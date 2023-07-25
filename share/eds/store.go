@@ -128,7 +128,7 @@ func (s *Store) Start(ctx context.Context) error {
 	s.lastGCResult.Store(&dagstore.GCResult{
 		Shards: make(map[shard.Key]error),
 	})
-	go s.gc(ctx)
+	//go s.gc(ctx)
 	return nil
 }
 
