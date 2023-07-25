@@ -5,6 +5,7 @@ import (
 	"errors"
 	_ "expvar"
 	"fmt"
+	logging "github.com/ipfs/go-log/v2"
 	"github.com/pyroscope-io/client/pyroscope"
 	"go.uber.org/zap"
 	"math"
@@ -31,6 +32,7 @@ const (
 
 	pyroscopeEndpointFlag = "pyroscope"
 	putTimeoutFlag        = "timeout"
+	badgerLogLevelFlag    = "badger-log-level"
 )
 
 func init() {
@@ -52,6 +54,7 @@ func init() {
 	edsStoreStress.Flags().Bool(edsCleanupFlag, false, "Cleans up the store on stop. Disabled by default.")
 	edsStoreStress.Flags().Bool(edsFreshStartFlag, false, "Cleanup previous state on start. Disabled by default.")
 	edsStoreStress.Flags().Int(putTimeoutFlag, 30, "Sets put timeout in seconds. 30 sec by default.")
+	edsStoreStress.Flags().String(badgerLogLevelFlag, "INFO", "Badger log level, Defaults to INFO")
 
 	// kill redundant print
 	nodebuilder.PrintKeyringInfo = false
@@ -114,6 +117,8 @@ var edsStoreStress = &cobra.Command{
 		edsWrites, _ := cmd.Flags().GetInt(edsWritesFlag)
 		edsSize, _ := cmd.Flags().GetInt(edsSizeFlag)
 		putTimeout, _ := cmd.Flags().GetInt(putTimeoutFlag)
+		loglevel, _ := cmd.Flags().GetString(badgerLogLevelFlag)
+
 		cfg := edssser.Config{
 			EDSSize:     edsSize,
 			EDSWrites:   edsWrites,
@@ -134,6 +139,11 @@ var edsStoreStress = &cobra.Command{
 		defer func() {
 			err = errors.Join(err, nodestore.Close())
 		}()
+
+		err = logging.SetLogLevel("badger", loglevel)
+		if err != nil {
+			return err
+		}
 
 		datastore, err := nodestore.Datastore()
 		if err != nil {
