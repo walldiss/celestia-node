@@ -84,7 +84,10 @@ func NewStore(basepath string, ds datastore.Batching) (*Store, error) {
 		return nil, fmt.Errorf("failed to create index repository: %w", err)
 	}
 
-	invertedRepo := newSimpleInvertedIndex(ds)
+	invertedRepo, err := newSimpleInvertedIndex(ds, basepath)
+	if err != nil {
+		return nil, err
+	}
 	dagStore, err := dagstore.NewDAGStore(
 		dagstore.Config{
 			TransientsDir: basepath + transientsPath,
