@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	dsbadger "github.com/celestiaorg/go-ds-badger4"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	"github.com/ipfs/go-datastore"
 	"github.com/mitchellh/go-homedir"
 	"path/filepath"
 	"sync"
-	"time"
-
-	dsbadger "github.com/celestiaorg/go-ds-badger4"
 
 	"github.com/celestiaorg/celestia-node/libs/fslock"
 	"github.com/celestiaorg/celestia-node/libs/keystore"
@@ -119,14 +117,10 @@ func (f *fsStore) Datastore() (datastore.Batching, error) {
 	}
 
 	opts := dsbadger.DefaultOptions // this should be copied
-	opts.NumGoroutines = 8
 	//opts.LmaxCompaction = true
 	opts.GcInterval = 0
-	opts.GcSleep = time.Second
-	opts.NumCompactors = 7 // Run at least 2 compactors. Zero-th compactor prioritizes L0.
-	opts.NumLevelZeroTables = 2
-	opts.NumMemtables = 10
-	opts.NumLevelZeroTablesStall = 15
+	opts.NumCompactors = 20 // Run at least 2 compactors. Zero-th compactor prioritizes L0.
+	opts.NumLevelZeroTables = 1
 
 	//opts.VLogPercentile = 1.0 // fuck vlog! put everything in lsm
 	//opts.DetectConflicts = true
