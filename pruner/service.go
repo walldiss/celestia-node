@@ -104,29 +104,44 @@ func (s *Service) prune() {
 			close(s.doneCh)
 			return
 		case <-ticker.C:
-			headers, err := s.findPruneableHeaders(s.ctx)
+			target, err := s.findPruneableTarget(s.ctx)
 			if err != nil {
 				// TODO @renaynay: record + report errors properly
+				// TODO @walldiss: not critical, we will retry on next tick
 				continue
 			}
-			// TODO @renaynay: make deadline a param ? / configurable?
-			pruneCtx, cancel := context.WithDeadline(s.ctx, time.Now().Add(time.Minute))
-			for _, eh := range headers {
-				err = s.pruner.Prune(pruneCtx, eh)
+
+			from, to := s.lastPruned().Height(), target.Height()
+			for height := from; height < to; height++ {
+				err = s.pruneHeight(s.ctx, height)
 				if err != nil {
 					// TODO: @distractedm1nd: updatecheckpoint should be called on the last NON-ERRORED header
-					log.Errorf("failed to prune header %d: %s", eh.Height(), err)
-					s.failedHeaders[eh.Height()] = err
+					log.Errorf("failed to prune header %d: %s", height, err)
+					s.failedHeaders[height] = err
 				}
-				s.metrics.observePrune(pruneCtx, err != nil)
+				s.metrics.observePrune(s.ctx, err != nil)
 			}
-			cancel()
 
-			err = s.updateCheckpoint(s.ctx, headers[len(headers)-1])
+			err = s.updateCheckpoint(s.ctx, target)
 			if err != nil {
 				// TODO @renaynay: record + report errors properly
 				continue
 			}
 		}
 	}
+}
+
+// TODO: @walldiss: this should be Pruner interface
+func (s *Service) pruneHeight(ctx context.Context, height uint64) error {
+	// TODO @renaynay: make deadline a param ? / configurable?
+	ctx, cancel := context.WithDeadline(s.ctx, time.Now().Add(time.Minute))
+	defer cancel()
+
+	eh, err := s.getter.GetByHeight(ctx, height)
+	if err != nil {
+		// header not found, so no data stored, we can skip pruning of this height
+		log.Debugf("pruner: header not found at height %d", height)
+		return nil
+	}
+	return s.pruner.Prune(ctx, eh)
 }

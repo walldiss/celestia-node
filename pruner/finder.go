@@ -27,13 +27,22 @@ func newCheckpoint(ds datastore.Datastore) *checkpoint {
 	return &checkpoint{ds: ds}
 }
 
-// findPruneableHeaders returns all headers that are eligible for pruning
-// (outside the sampling window).
-func (s *Service) findPruneableHeaders(ctx context.Context) ([]*header.ExtendedHeader, error) {
+// avgBlockTime is the average block time in seconds.
+var avgBlockTime = time.Second * 10
+
+// findPruneableTarget returns the header that is the target of the next prune.
+func (s *Service) findPruneableTarget(ctx context.Context) (*header.ExtendedHeader, error) {
 	lastPruned := s.lastPruned()
 
 	pruneCutoff := time.Now().Add(time.Duration(-s.window))
-	estimatedCutoffHeight := lastPruned.Height() + s.numBlocksInWindow
+
+	// handle system clock reset
+	if pruneCutoff.Before(lastPruned.Time()) {
+		return nil, fmt.Errorf("system clock reset detected, last pruned header is within the prune window")
+	}
+
+	timeDiff := pruneCutoff.Sub(lastPruned.Time())
+	estimatedCutoffHeight := lastPruned.Height() + uint64(timeDiff/avgBlockTime)
 
 	head, err := s.getter.Head(ctx)
 	if err != nil {
@@ -43,46 +52,46 @@ func (s *Service) findPruneableHeaders(ctx context.Context) ([]*header.ExtendedH
 		estimatedCutoffHeight = head.Height()
 	}
 
-	headers, err := s.getter.GetRangeByHeight(ctx, lastPruned, estimatedCutoffHeight)
-	if err != nil {
-		return nil, err
-	}
-
-	// if our estimated range didn't cover enough headers, we need to fetch more
-	// TODO: This is really inefficient in the case that lastPruned is the default value, or if the
-	// node has been offline for a long time. Instead of increasing the boundary by one in the for
-	// loop we could increase by a range every iteration
-	headerCount := len(headers)
 	for {
-		if headerCount > int(s.maxPruneablePerGC) {
-			headers = headers[:s.maxPruneablePerGC]
-			break
-		}
-		lastHeader := headers[len(headers)-1]
-		if lastHeader.Time().After(pruneCutoff) {
-			break
-		}
-
-		nextHeader, err := s.getter.GetByHeight(ctx, lastHeader.Height()+1)
+		getCtx, cancel := context.WithTimeout(ctx, time.Second)
+		nextHeader, err := s.getter.GetByHeight(getCtx, estimatedCutoffHeight)
+		cancel()
 		if err != nil {
-			return nil, err
-		}
-		headers = append(headers, nextHeader)
-		headerCount++
-	}
-
-	for i, h := range headers {
-		if h.Time().After(pruneCutoff) {
-			if i == 0 {
-				// we can't prune anything
-				return nil, nil
+			// we tried all the way back to the last pruned header
+			if estimatedCutoffHeight == lastPruned.Height() {
+				return nil, fmt.Errorf("failed to find pruneable headers: %w", err)
 			}
 
-			// we can ignore the rest of the headers since they are all newer than the cutoff
-			return headers[:i], nil
+			// try again with a lower cutoff
+			estimatedCutoffHeight--
+			continue
 		}
+
+		// estimated header is before the cutoff
+		if nextHeader.Time().Before(pruneCutoff) {
+			timeDiff = pruneCutoff.Sub(nextHeader.Time())
+			// if the diff is less than 2x the average block time, we can assume we're close enough
+			if timeDiff < avgBlockTime*2 {
+				return nextHeader, nil
+			}
+
+			// if the next header is before the cutoff, we need to search forward
+			estimatedCutoffHeight = nextHeader.Height() + uint64(timeDiff/avgBlockTime)
+			continue
+		}
+
+		// we overshot the cutoff, so we need to search backwards
+		newTimeDiff := nextHeader.Time().Sub(pruneCutoff)
+		if errFactor := newTimeDiff / timeDiff; errFactor > 1 {
+			// block time estimation was too low and thrown us too far forward, increase it and try again
+			avgBlockTime *= errFactor + 1
+			estimatedCutoffHeight = lastPruned.Height() + uint64(timeDiff/avgBlockTime)
+			continue
+		}
+
+		timeDiff = newTimeDiff
+		estimatedCutoffHeight = nextHeader.Height() - uint64(timeDiff/avgBlockTime)
 	}
-	return headers, nil
 }
 
 // initializeCheckpoint initializes the checkpoint, storing the earliest header in the chain.
