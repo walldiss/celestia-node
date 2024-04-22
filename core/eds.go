@@ -25,10 +25,10 @@ import (
 
 // extendBlock extends the given block data, returning the resulting
 // ExtendedDataSquare (EDS). If there are no transactions in the block,
-// nil is returned in place of the eds.
+// empty eds is returned.
 func extendBlock(data types.Data, appVersion uint64, options ...nmt.Option) (*rsmt2d.ExtendedDataSquare, error) {
 	if app.IsEmptyBlock(data, appVersion) {
-		return nil, nil
+		return share.EmptyExtendedDataSquare(), nil
 	}
 
 	// Construct the data square from the block's transactions
