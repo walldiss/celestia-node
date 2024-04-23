@@ -48,7 +48,10 @@ func (fa *ShareAvailability) Start(context.Context) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	fa.cancel = cancel
 
-	go fa.disc.Advertise(ctx)
+	// TODO(@walldiss): this should be managed by nodebuilder, not availability
+	if fa.disc != nil {
+		go fa.disc.Advertise(ctx)
+	}
 	return nil
 }
 
@@ -60,7 +63,7 @@ func (fa *ShareAvailability) Stop(context.Context) error {
 // SharesAvailable reconstructs the data committed to the given Root by requesting
 // enough Shares from the network.
 func (fa *ShareAvailability) SharesAvailable(ctx context.Context, header *header.ExtendedHeader) error {
-	// a hack to avoid loading the whole EDS in mem if we store it already.
+	// check to avoid unnecessary data retrieval if the eds is already stored in the store for different height
 	if ok, _ := fa.store.HasByHash(ctx, header.DAH.Hash()); ok {
 		return fa.store.LinkHashToHeight(ctx, header.DAH.Hash(), header.Height())
 	}

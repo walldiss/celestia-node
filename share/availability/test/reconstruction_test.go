@@ -1,6 +1,6 @@
 //go:build !race
 
-package full
+package availability_test
 
 import (
 	"context"
@@ -14,7 +14,6 @@ import (
 	"github.com/celestiaorg/celestia-node/header/headertest"
 	"github.com/celestiaorg/celestia-node/share"
 	"github.com/celestiaorg/celestia-node/share/availability/light"
-	availability_test "github.com/celestiaorg/celestia-node/share/availability/test"
 	"github.com/celestiaorg/celestia-node/share/eds"
 )
 
@@ -36,7 +35,7 @@ func TestShareAvailable_OneFullNode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	net := availability_test.NewTestDAGNet(ctx, t)
+	net := NewTestDAGNet(ctx, t)
 	source, root := RandNode(net, origSquareSize) // make a source node, a.k.a bridge
 	eh := headertest.RandExtendedHeader(t)
 	eh.DAH = root
@@ -51,7 +50,7 @@ func TestShareAvailable_OneFullNode(t *testing.T) {
 		return full.SharesAvailable(errCtx, eh)
 	})
 
-	lights := make([]*availability_test.TestNode, lightNodes)
+	lights := make([]*TestNode, lightNodes)
 	for i := 0; i < len(lights); i++ {
 		lights[i] = light.Node(net)
 		go func(i int) {
@@ -92,7 +91,7 @@ func TestShareAvailable_ConnectedFullNodes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	defer cancel()
 
-	net := availability_test.NewTestDAGNet(ctx, t)
+	net := NewTestDAGNet(ctx, t)
 	source, root := RandNode(net, origSquareSize)
 	eh := headertest.RandExtendedHeader(t)
 	eh.DAH = root
@@ -119,8 +118,8 @@ func TestShareAvailable_ConnectedFullNodes(t *testing.T) {
 
 	// create light nodes and start sampling for them immediately
 	lights1, lights2 := make(
-		[]*availability_test.TestNode, lightNodes/2),
-		make([]*availability_test.TestNode, lightNodes/2)
+		[]*TestNode, lightNodes/2),
+		make([]*TestNode, lightNodes/2)
 	for i := 0; i < len(lights1); i++ {
 		lights1[i] = light.Node(net)
 		go func(i int) {
@@ -192,15 +191,15 @@ func TestShareAvailable_DisconnectedFullNodes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*60)
 	defer cancel()
 
-	net := availability_test.NewTestDAGNet(ctx, t)
+	net := NewTestDAGNet(ctx, t)
 	source, root := RandNode(net, origSquareSize)
 	eh := headertest.RandExtendedHeader(t)
 	eh.DAH = root
 
 	// create light nodes and start sampling for them immediately
 	lights1, lights2 := make(
-		[]*availability_test.TestNode, lightNodes/2),
-		make([]*availability_test.TestNode, lightNodes/2)
+		[]*TestNode, lightNodes/2),
+		make([]*TestNode, lightNodes/2)
 
 	var wg sync.WaitGroup
 	wg.Add(lightNodes)

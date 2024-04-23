@@ -1,8 +1,8 @@
 package full
 
-// FIXME: rework testing pkg
-// GetterWithRandSquare provides a share.Getter filled with 'n' NMT
-// trees of 'n' random shares, essentially storing a whole square.
+//
+//// GetterWithRandSquare provides a share.Getter filled with 'n' NMT
+//// trees of 'n' random shares, essentially storing a whole square.
 //func GetterWithRandSquare(t *testing.T, n int) (share.Getter, *share.Root) {
 //	bServ := ipld.NewMemBlockservice()
 //	getter := getters.NewIPLDGetter(bServ)
