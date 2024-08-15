@@ -37,8 +37,9 @@ func ReadAccessor(ctx context.Context, reader io.Reader, root *share.AxisRoots) 
 	return rsmt2d, nil
 }
 
-// ReadShares reads shares from the provided io.Reader until EOF. If EOF is reached, the remaining shares
-// are populated as tail padding shares. Provided reader must contain shares in row-major order.
+// ReadShares reads shares from the provided io.Reader until EOF. If EOF is reached, the remaining
+// shares are populated as tail padding shares. Provided reader must contain shares in row-major
+// order.
 func ReadShares(r io.Reader, shareSize, odsSize int) ([]share.Share, error) {
 	shares := make([]share.Share, odsSize*odsSize)
 	var total int

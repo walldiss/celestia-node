@@ -81,8 +81,8 @@ func writeQ4File(f *os.File, eds *rsmt2d.ExtendedDataSquare, hdr *headerV0) erro
 	return nil
 }
 
-// writeQ4 writes the forth quadrant of the square to the writer. It writes the quadrant in row-major
-// order.
+// writeQ4 writes the forth quadrant of the square to the writer. It writes the quadrant in
+// row-major order.
 func writeQ4(w io.Writer, eds *rsmt2d.ExtendedDataSquare) error {
 	half := eds.Width() / 2
 	for i := range half {

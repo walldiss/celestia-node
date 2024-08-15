@@ -21,7 +21,8 @@ type ShareReader struct {
 	current, odsSize, total int
 }
 
-// NewShareReader constructs a new ShareGetter from underlying ODS size and general share getting function.
+// NewShareReader constructs a new ShareGetter from underlying ODS size and general share getting
+// function.
 func NewShareReader(odsSize int, getShare func(rowIdx, colIdx int) ([]byte, error)) *ShareReader {
 	return &ShareReader{
 		getShare: getShare,

@@ -38,12 +38,14 @@ const (
 
 // Server constants
 const (
-	// providesEnabled dictates Bitswap Server not to provide content to DHT/ContentRouting as we don't use it
+	// providesEnabled dictates Bitswap Server not to provide content to DHT/ContentRouting as we don't
+	// use it
 	providesEnabled = false
-	// sendDontHaves prevents Bitswap Server from sending DONT_HAVEs while keeping peers on hold instead:
-	//  * Clients simulate DONT_HAVEs after timeout anyway
+	// sendDontHaves prevents Bitswap Server from sending DONT_HAVEs while keeping peers on hold
+	// instead:  * Clients simulate DONT_HAVEs after timeout anyway
 	//  * Servers may not have data immediately and this gives an opportunity to subscribe
-	//  * This is necessary for reconstruction. See https://github.com/celestiaorg/celestia-node/issues/732
+	//  * This is necessary for reconstruction. See
+	// https://github.com/celestiaorg/celestia-node/issues/732
 	sendDontHaves = false
 	// maxServerWantListsPerPeer defines the limit for maximum possible cached wants/requests per peer
 	// in the Bitswap. Exceeding this limit will cause Bitswap server to drop requested wants leaving
@@ -60,9 +62,9 @@ const (
 	// Bitswap's size lookup via [Blockstore] will already cause underlying cache to keep the data,
 	// so reading up data is fast, and we can aim to pack as much as we can.
 	targetMessageSize = 1 << 20 // 1MB
-	// outstandingBytesPerPeer limits number of bytes queued for work for a peer across multiple requests.
-	// We set it to be equal to targetMessageSize * N, so there can max N messages being prepared for
-	// a peer at once.
+	// outstandingBytesPerPeer limits number of bytes queued for work for a peer across multiple
+	// requests. We set it to be equal to targetMessageSize * N, so there can max N messages being
+	// prepared for a peer at once.
 	outstandingBytesPerPeer = targetMessageSize * 4
 )
 
