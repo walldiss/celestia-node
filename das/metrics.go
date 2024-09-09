@@ -155,7 +155,8 @@ func (m *metrics) observeSample(
 		return
 	}
 
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.sampleTime.Record(ctx, sampleTime.Seconds(),
 		metric.WithAttributes(
@@ -179,7 +180,8 @@ func (m *metrics) observeGetHeader(ctx context.Context, d time.Duration) {
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 	m.getHeaderTime.Record(ctx, d.Seconds())
 }
 
@@ -188,6 +190,7 @@ func (m *metrics) observeNewHead(ctx context.Context) {
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 	m.newHead.Add(ctx, 1)
 }

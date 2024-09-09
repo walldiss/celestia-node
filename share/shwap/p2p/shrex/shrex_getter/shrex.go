@@ -50,7 +50,8 @@ func (m *metrics) recordEDSAttempt(ctx context.Context, attemptCount int, succes
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 	m.edsAttempts.Record(ctx, int64(attemptCount),
 		metric.WithAttributes(
 			attribute.Bool("success", success)))
@@ -60,7 +61,8 @@ func (m *metrics) recordNDAttempt(ctx context.Context, attemptCount int, success
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 	m.ndAttempts.Record(ctx, int64(attemptCount),
 		metric.WithAttributes(
 			attribute.Bool("success", success)))

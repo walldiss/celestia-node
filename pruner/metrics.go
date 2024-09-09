@@ -3,6 +3,8 @@ package pruner
 import (
 	"context"
 
+	"github.com/celestiaorg/celestia-node/libs/utils"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -70,9 +72,9 @@ func (m *metrics) observePrune(ctx context.Context, failed bool) {
 	if m == nil {
 		return
 	}
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
+
 	m.prunedCounter.Add(ctx, 1, metric.WithAttributes(
 		attribute.Bool("failed", failed)))
 }

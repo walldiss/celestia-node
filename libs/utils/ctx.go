@@ -6,12 +6,12 @@ import (
 )
 
 // ResetContextOnError returns a fresh context if the given context has an error.
-func ResetContextOnError(ctx context.Context) context.Context {
+func ResetContextOnError(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx.Err() != nil {
-		ctx = context.Background()
+		return context.WithTimeout(context.Background(), time.Second)
 	}
 
-	return ctx
+	return context.WithCancel(ctx)
 }
 
 // CtxWithSplitTimeout will split timeout stored in context by splitFactor and return the result if

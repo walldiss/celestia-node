@@ -182,7 +182,8 @@ func (m *metrics) observeGetPeer(
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 	m.getPeer.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String(sourceKey, string(source)),
@@ -233,7 +234,8 @@ func (m *metrics) validationObserver(validator shrexsub.ValidatorFn) shrexsub.Va
 			resStr = "unknown"
 		}
 
-		ctx = utils.ResetContextOnError(ctx)
+		ctx, cancel := utils.ResetContextOnError(ctx)
+		defer cancel()
 
 		m.validationResult.Add(ctx, 1,
 			metric.WithAttributes(

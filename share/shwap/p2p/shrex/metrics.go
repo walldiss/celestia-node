@@ -37,7 +37,8 @@ func (m *Metrics) ObserveRequests(ctx context.Context, count int64, status statu
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 	m.totalRequestCounter.Add(ctx, count,
 		metric.WithAttributes(
 			attribute.String("status", string(status)),

@@ -129,7 +129,8 @@ func (m *metrics) observeFindPeers(ctx context.Context, isEnoughPeers bool) {
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.discoveryResult.Add(ctx, 1,
 		metric.WithAttributes(
@@ -140,7 +141,8 @@ func (m *metrics) observeHandlePeer(ctx context.Context, result handlePeerResult
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.handlePeerResult.Add(ctx, 1,
 		metric.WithAttributes(
@@ -151,7 +153,8 @@ func (m *metrics) observeAdvertise(ctx context.Context, err error) {
 	if m == nil {
 		return
 	}
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.advertise.Add(ctx, 1,
 		metric.WithAttributes(

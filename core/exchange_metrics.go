@@ -33,7 +33,8 @@ func (m *exchangeMetrics) observe(ctx context.Context, observeFn func(ctx contex
 		return
 	}
 
-	ctx = utils.ResetContextOnError(ctx)
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	observeFn(ctx)
 }

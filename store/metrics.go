@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/celestiaorg/celestia-node/libs/utils"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -94,9 +96,8 @@ func (m *metrics) observePut(ctx context.Context, dur time.Duration, size uint, 
 	if m == nil {
 		return
 	}
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.put.Record(ctx, dur.Seconds(), metric.WithAttributes(
 		attribute.Bool(failedKey, failed),
@@ -107,9 +108,8 @@ func (m *metrics) observePutExist(ctx context.Context) {
 	if m == nil {
 		return
 	}
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.putExists.Add(ctx, 1)
 }
@@ -118,9 +118,8 @@ func (m *metrics) observeGet(ctx context.Context, dur time.Duration, failed bool
 	if m == nil {
 		return
 	}
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.get.Record(ctx, dur.Seconds(), metric.WithAttributes(
 		attribute.Bool(failedKey, failed)))
@@ -130,9 +129,8 @@ func (m *metrics) observeHas(ctx context.Context, dur time.Duration, failed bool
 	if m == nil {
 		return
 	}
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.has.Record(ctx, dur.Seconds(), metric.WithAttributes(
 		attribute.Bool(failedKey, failed)))
@@ -142,9 +140,8 @@ func (m *metrics) observeRemoveAll(ctx context.Context, dur time.Duration, faile
 	if m == nil {
 		return
 	}
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.removeAll.Record(ctx, dur.Seconds(), metric.WithAttributes(
 		attribute.Bool(failedKey, failed)))
@@ -154,9 +151,8 @@ func (m *metrics) observeRemoveQ4(ctx context.Context, dur time.Duration, failed
 	if m == nil {
 		return
 	}
-	if ctx.Err() != nil {
-		ctx = context.Background()
-	}
+	ctx, cancel := utils.ResetContextOnError(ctx)
+	defer cancel()
 
 	m.removeQ4.Record(ctx, dur.Seconds(), metric.WithAttributes(
 		attribute.Bool(failedKey, failed)))
