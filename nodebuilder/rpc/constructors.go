@@ -31,9 +31,9 @@ func registerEndpoints(
 	serv *rpc.Server,
 ) {
 	serv.RegisterService("fraud", fraudMod, &fraud.API{})
-	serv.RegisterService("das", daserMod, &das.API{})
+	// serv.RegisterService("das", daserMod, &das.API{})
 	serv.RegisterService("header", headerMod, &header.API{})
-	serv.RegisterService("state", stateMod, &state.API{})
+	// serv.RegisterService("state", stateMod, &state.API{})
 	serv.RegisterService("share", shareMod, &share.API{})
 	serv.RegisterService("p2p", p2pMod, &p2p.API{})
 	serv.RegisterService("node", nodeMod, &node.API{})
