@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -19,6 +20,10 @@ import (
 	"github.com/celestiaorg/celestia-node/store"
 )
 
+// listenerSubChSize is the per-subscription buffer size for headers delivered
+// after EDS is stored locally.
+const listenerSubChSize = 64
+
 // Listener is responsible for listening to Core for
 // new block events and converting new Core blocks into
 // the main data structure used in the Celestia DA network:
@@ -26,6 +31,12 @@ import (
 // it, and generating the `ExtendedHeader`, the Listener
 // broadcasts the new `ExtendedHeader` to the header-sub gossipsub
 // network.
+//
+// Listener also implements libhead.Subscriber so that bridge-node DASers
+// can subscribe to headers directly from the Listener rather than from
+// the p2p network, guaranteeing that EDS is already in the local store
+// before the DASer processes a header. Multiple concurrent subscriptions
+// are supported; each receives every header via its own buffered channel.
 type Listener struct {
 	fetcher *BlockFetcher
 
@@ -36,6 +47,12 @@ type Listener struct {
 
 	headerBroadcaster libhead.Broadcaster[*header.ExtendedHeader]
 	hashBroadcaster   shrexsub.BroadcastFn
+
+	// subsMu protects subs.
+	subsMu sync.Mutex
+	// subs holds all active subscriptions. Each header is fan-out delivered
+	// to every subscription after EDS is stored locally.
+	subs []*listenerSubscription
 
 	metrics *listenerMetrics
 
@@ -83,6 +100,58 @@ func NewListener(
 		metrics:            metrics,
 		chainID:            p.chainID,
 	}, nil
+}
+
+// Subscribe returns a new Subscription that receives every header after EDS is
+// stored. Each subscription has its own buffered channel so slow consumers do
+// not block the listener or other subscribers.
+// Implements libhead.Subscriber for use by bridge-node DASers.
+func (cl *Listener) Subscribe() (libhead.Subscription[*header.ExtendedHeader], error) {
+	sub := &listenerSubscription{
+		ch: make(chan *header.ExtendedHeader, listenerSubChSize),
+	}
+	sub.cancelFn = func() { cl.removeSub(sub) }
+
+	cl.subsMu.Lock()
+	cl.subs = append(cl.subs, sub)
+	cl.subsMu.Unlock()
+
+	return sub, nil
+}
+
+// SetVerifier is a no-op: headers from the core listener have already been
+// validated locally before being written to subscriber channels.
+func (cl *Listener) SetVerifier(func(context.Context, *header.ExtendedHeader) error) error {
+	return nil
+}
+
+// removeSub unregisters sub and closes its channel.
+func (cl *Listener) removeSub(sub *listenerSubscription) {
+	cl.subsMu.Lock()
+	defer cl.subsMu.Unlock()
+	for i, s := range cl.subs {
+		if s == sub {
+			cl.subs = append(cl.subs[:i], cl.subs[i+1:]...)
+			close(sub.ch)
+			return
+		}
+	}
+}
+
+// notifySubs fan-outs eh to all active subscriptions. Non-blocking: if a
+// subscription's buffer is full the header is dropped for that subscriber and
+// a warning is logged.
+func (cl *Listener) notifySubs(eh *header.ExtendedHeader) {
+	cl.subsMu.Lock()
+	defer cl.subsMu.Unlock()
+	for _, sub := range cl.subs {
+		select {
+		case sub.ch <- eh:
+		default:
+			log.Warnw("listener: subscriber channel full, dropping header",
+				"height", eh.Height())
+		}
+	}
 }
 
 // Start kicks off the Listener listener loop.
@@ -222,6 +291,9 @@ func (cl *Listener) handleNewSignedBlock(ctx context.Context, b SignedBlock) err
 	}
 	span.AddEvent("listener: stored square")
 
+	// fan-out header to all active subscribers after EDS is stored
+	cl.notifySubs(eh)
+
 	syncing, err := cl.fetcher.IsSyncing(ctx)
 	if err != nil {
 		return fmt.Errorf("getting sync state: %w", err)
@@ -249,4 +321,37 @@ func (cl *Listener) handleNewSignedBlock(ctx context.Context, b SignedBlock) err
 			"err", err)
 	}
 	return nil
+}
+
+// listenerSubscription implements libhead.Subscription backed by a per-subscriber
+// buffered channel. Each subscription receives every header independently.
+type listenerSubscription struct {
+	ch       chan *header.ExtendedHeader
+	cancelFn func()
+	once     sync.Once
+}
+
+func (s *listenerSubscription) NextHeader(ctx context.Context) (*header.ExtendedHeader, error) {
+	select {
+	case h, ok := <-s.ch:
+		if !ok {
+			return nil, context.Canceled
+		}
+		return h, nil
+	case <-ctx.Done():
+		// Auto-cancel so the subscription is cleaned up even if the caller
+		// never calls Cancel() explicitly (e.g. context cancelled by API).
+		s.cancel()
+		return nil, ctx.Err()
+	}
+}
+
+func (s *listenerSubscription) Cancel() {
+	s.cancel()
+}
+
+// cancel is the internal idempotent cleanup: unregisters the subscription and
+// closes its channel exactly once regardless of how many times it is called.
+func (s *listenerSubscription) cancel() {
+	s.once.Do(s.cancelFn)
 }

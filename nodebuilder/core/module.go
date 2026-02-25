@@ -71,7 +71,8 @@ func ConstructModule(tp node.Type, cfg *Config, options ...fx.Option) fx.Option 
 				)
 			},
 				new(libhead.Exchange[*header.ExtendedHeader])),
-			fx.Invoke(fx.Annotate(
+			// Provide the Listener so it can be consumed as libhead.Subscriber by the DASer.
+			fx.Provide(fx.Annotate(
 				func(
 					bcast libhead.Broadcaster[*header.ExtendedHeader],
 					fetcher *core.BlockFetcher,
@@ -96,6 +97,8 @@ func ConstructModule(tp node.Type, cfg *Config, options ...fx.Option) fx.Option 
 					return listener.Stop(ctx)
 				}),
 			)),
+			// Force the Listener to be instantiated (fx.Provide is lazy).
+			fx.Invoke(func(*core.Listener) {}),
 		)
 	default:
 		panic("invalid node type")

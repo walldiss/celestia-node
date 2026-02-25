@@ -22,7 +22,7 @@ func TestConstructModule_DASDisabledStub(t *testing.T) {
 	cfg := DefaultConfig(node.Light)
 	cfg.Enabled = false // Explicitly disable DAS
 	app := fxtest.New(t,
-		ConstructModule(&cfg),
+		ConstructModule(node.Light, &cfg),
 		fx.Populate(&mod)).
 		RequireStart()
 	defer app.RequireStop()
