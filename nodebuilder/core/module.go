@@ -35,7 +35,34 @@ func ConstructModule(tp node.Type, cfg *Config, options ...fx.Option) fx.Option 
 
 	switch tp {
 	case node.Light:
-		return fx.Module("core", baseComponents)
+		if !cfg.IsEndpointConfigured() {
+			return fx.Module("core", baseComponents)
+		}
+		return fx.Module("core",
+			baseComponents,
+			fx.Provide(core.NewBlockFetcher),
+			fx.Supply(header.MakeExtendedHeader),
+			fx.Provide(func(
+				fetcher *core.BlockFetcher,
+				store *store.Store,
+				construct header.ConstructFn,
+				p2pEx *headp2p.Exchange[*header.ExtendedHeader],
+				chainID p2p.Network,
+				opts []core.Option,
+			) (*core.Exchange, error) {
+				opts = append(opts, core.WithChainID(chainID), core.WithP2PExchange(p2pEx))
+				if MetricsEnabled {
+					opts = append(opts, core.WithMetrics())
+				}
+				return core.NewExchange(fetcher, store, construct, opts...)
+			}),
+			fxutil.ProvideAs(func(
+				coreEx *core.Exchange,
+				p2pEx *headp2p.Exchange[*header.ExtendedHeader],
+			) *core.LightExchange {
+				return core.NewLightExchange(p2pEx, coreEx)
+			}, new(libhead.Exchange[*header.ExtendedHeader])),
+		)
 	case node.Bridge:
 		return fx.Module("core",
 			baseComponents,

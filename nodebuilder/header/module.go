@@ -22,7 +22,7 @@ import (
 
 var log = logging.Logger("module/header")
 
-func ConstructModule[H libhead.Header[H]](tp node.Type, cfg *Config) fx.Option {
+func ConstructModule[H libhead.Header[H]](tp node.Type, cfg *Config, coreExchangeAvailable ...bool) fx.Option {
 	// sanitize config values before constructing module
 	cfgErr := cfg.Validate(tp)
 
@@ -103,6 +103,14 @@ func ConstructModule[H libhead.Header[H]](tp node.Type, cfg *Config) fx.Option {
 
 	switch tp {
 	case node.Light:
+		// When core exchange is available (light node with --core.ip),
+		// libhead.Exchange is provided by the core module with P2P+core fallback.
+		if len(coreExchangeAvailable) > 0 && coreExchangeAvailable[0] {
+			return fx.Module(
+				"header",
+				baseComponents,
+			)
+		}
 		return fx.Module(
 			"header",
 			baseComponents,
